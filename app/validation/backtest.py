@@ -166,8 +166,8 @@ def run_backtest(
                 exit_fee = slipped_exit * qty * config.fee_rate
                 fees = entry_fee + exit_fee
                 net = gross - fees
-                equity += net
-                total_fees += fees
+                # Entry fee was deducted when the position opened; realize only gross PnL minus exit fee here.
+                equity += gross - exit_fee
                 trades.append(ClosedTrade(direction, int(position["signal_timestamp"]),
                     int(position["entry_timestamp"]), candle.timestamp, entry, slipped_exit,
                     qty, gross, fees, net, reason))
