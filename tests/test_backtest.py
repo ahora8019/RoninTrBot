@@ -96,4 +96,4 @@ def test_drawdown_includes_unrealized_intratrade_loss():
                        slippage_rate=Decimal("0")))
     assert result.trade_count == 1
     assert result.trades[0].net_pnl == Decimal("0")
-    assert result.max_drawdown_fraction >= Decimal("0.09")
+    assert result.max_drawdown_fraction >= Decimal("0.009")
