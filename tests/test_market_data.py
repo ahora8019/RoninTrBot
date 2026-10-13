@@ -6,6 +6,7 @@ from app.market_data.lbank import (
     Candle,
     LBankMarketDataClient,
     MarketDataAPIError,
+    MarketDataError,
     MarketDataHTTPError,
     MarketDataValidationError,
 )
@@ -49,17 +50,71 @@ def test_fetch_normalizes_and_sorts_candles_and_uses_documented_params():
     assert isinstance(candles[0], Candle)
     assert candles[0].open == Decimal("80")
     assert calls[0][0].endswith("/v2/kline.do")
+    # LBank treats `time` as a START timestamp and caps `size` from the start,
+    # so the client must request a start window of limit*interval seconds back
+    # and `limit + 1` rows to obtain the `limit` most recent candles.
     assert calls[0][1] == {
         "symbol": "btc_usdt",
         "type": "minute15",
-        "size": "2",
-        "time": str(NOW),
+        "size": "3",
+        "time": str(NOW - 2 * 900),
     }
+
+
+def test_fetch_history_returns_the_most_recent_limit_candles():
+    # The server answers the whole window (limit + 1 rows including the extra
+    # boundary candle); the adapter must trim to the most recent `limit`.
+    window = [row(NOW - 900 * k) for k in range(3, 0, -1)]
+    payload = {"result": "true", "error_code": 0, "data": window}
+    client, _ = client_with(payload)
+
+    candles = client.fetch_ohlcv("btc_usdt", "15m", 2)
+
+    assert [c.timestamp for c in candles] == [NOW - 1800, NOW - 900]
+
+
+def test_rejects_unaligned_candle_timestamp():
+    payload = {"result": "true", "error_code": 0, "data": [row(NOW - 870)]}
+    client, _ = client_with(payload)
+    with pytest.raises(MarketDataValidationError, match="not aligned"):
+        client.fetch_ohlcv("btc_usdt", "15m")
+
+
+def test_rejects_gap_in_candle_series():
+    payload = {"result": "true", "error_code": 0, "data": [row(NOW - 2700), row(NOW - 900)]}
+    client, _ = client_with(payload)
+    with pytest.raises(MarketDataValidationError, match="gap"):
+        client.fetch_ohlcv("btc_usdt", "15m")
+
+
+def test_limit_above_window_safe_maximum_is_rejected():
+    client, calls = client_with({"result": "true", "error_code": 0, "data": [row()]})
+    with pytest.raises(ValueError, match="limit"):
+        client.fetch_ohlcv("btc_usdt", "15m", 2000)
+    assert calls == []
+
+
+def test_oversized_response_is_rejected(monkeypatch):
+    import app.market_data.lbank as lbank_module
+
+    class HugeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            return b"x" * size if size > 0 else b"x" * 32
+
+    monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: HugeResponse())
+    with pytest.raises(MarketDataError, match="maximum allowed size"):
+        lbank_module._default_transport("https://example.invalid", {}, 1.0)
 
 
 @pytest.mark.parametrize(("interval", "api_type"), [("15m", "minute15"), ("1h", "hour1"), ("4h", "hour4")])
 def test_supported_intervals(interval, api_type):
-    payload = {"result": "true", "error_code": 0, "data": [row(NOW - 60)]}
+    payload = {"result": "true", "error_code": 0, "data": [row(NOW)]}  # NOW is aligned to 15m/1h/4h
     client, calls = client_with(payload)
 
     client.fetch_ohlcv("eth_usdt", interval, 1)
@@ -123,7 +178,7 @@ def test_rejects_duplicate_timestamps():
 
 
 def test_rejects_stale_latest_candle():
-    client, _ = client_with({"result": "true", "error_code": 0, "data": [row(NOW - 3 * 900 - 1)]})
+    client, _ = client_with({"result": "true", "error_code": 0, "data": [row(NOW - 4 * 900)]})
     with pytest.raises(MarketDataValidationError, match="stale"):
         client.fetch_ohlcv("btc_usdt", "15m")
 
