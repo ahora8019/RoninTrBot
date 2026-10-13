@@ -11,15 +11,11 @@ def test_expected_telegram_commands_are_registered():
         admin_ids=(456,),
     )
     application = build_application(settings)
-    try:
-        commands = {
-            command
-            for handlers in application.handlers.values()
-            for handler in handlers
-            if isinstance(handler, CommandHandler)
-            for command in handler.commands
-        }
-        assert {"start", "panel", "status", "help"}.issubset(commands)
-    finally:
-        # Application was constructed but never initialized or connected to Telegram.
-        pass
+    commands = {
+        command
+        for handlers in application.handlers.values()
+        for handler in handlers
+        if isinstance(handler, CommandHandler)
+        for command in handler.commands
+    }
+    assert {"start", "panel", "status", "help"}.issubset(commands)
