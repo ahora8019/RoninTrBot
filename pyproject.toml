@@ -7,7 +7,7 @@ name = "ronintrbot"
 version = "1.0.0"
 description = "Python-first Telegram trading assistant with staged safety controls"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["python-telegram-bot>=21,<23"]
 
 [project.optional-dependencies]
 test = ["pytest>=8.0"]

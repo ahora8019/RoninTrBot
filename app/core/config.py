@@ -14,6 +14,7 @@ class ConfigurationError(ValueError):
 class Settings:
     telegram_bot_token: str
     owner_ids: tuple[int, ...]
+    admin_ids: tuple[int, ...] = ()
     trading_mode: str = "paper"
     live_trading_enabled: bool = False
     scan_interval_seconds: int = 300
@@ -21,25 +22,25 @@ class Settings:
     minimum_signal_score: int = 70
 
 
-def _parse_owner_ids(raw: str) -> tuple[int, ...]:
+def _parse_ids(raw: str, variable_name: str) -> tuple[int, ...]:
     if not raw.strip():
         return ()
     values: list[int] = []
     for item in raw.split(","):
         item = item.strip()
         if not item.isdigit():
-            raise ConfigurationError("OWNER_IDS must be comma-separated numeric Telegram user IDs")
+            raise ConfigurationError(f"{variable_name} must be comma-separated numeric Telegram user IDs")
         values.append(int(item))
     if len(set(values)) != len(values):
-        raise ConfigurationError("OWNER_IDS must not contain duplicates")
+        raise ConfigurationError(f"{variable_name} must not contain duplicates")
     return tuple(values)
 
 
 def load_settings(environ: dict[str, str] | None = None) -> Settings:
     """Load settings from the provided mapping or process environment.
 
-    The token is required for runtime startup. Trading is forced to paper mode
-    in this foundation stage; live execution is not configurable here.
+    The token and at least one owner ID are required for runtime startup.
+    Trading is forced to paper mode; live execution is not configurable here.
     """
     env = os.environ if environ is None else environ
     token = env.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -48,9 +49,14 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
     if any(ch.isspace() for ch in token):
         raise ConfigurationError("TELEGRAM_BOT_TOKEN must not contain whitespace")
 
-    owner_ids = _parse_owner_ids(env.get("OWNER_IDS", ""))
+    owner_ids = _parse_ids(env.get("OWNER_IDS", ""), "OWNER_IDS")
+    admin_ids = _parse_ids(env.get("ADMIN_IDS", ""), "ADMIN_IDS")
+    if not owner_ids:
+        raise ConfigurationError("OWNER_IDS must contain at least one owner Telegram user ID")
+    if set(owner_ids) & set(admin_ids):
+        raise ConfigurationError("OWNER_IDS and ADMIN_IDS must not overlap")
     requested_mode = env.get("TRADING_MODE", "paper").strip().lower()
     if requested_mode != "paper":
         raise ConfigurationError("Only TRADING_MODE=paper is supported in this stage")
 
-    return Settings(telegram_bot_token=token, owner_ids=owner_ids)
+    return Settings(telegram_bot_token=token, owner_ids=owner_ids, admin_ids=admin_ids)
