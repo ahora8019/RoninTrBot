@@ -50,3 +50,11 @@ def test_rejects_overlap_between_owner_and_admin_ids():
             "OWNER_IDS": "123",
             "ADMIN_IDS": "123,456",
         })
+
+
+def test_invalid_admin_ids_name_the_admin_setting():
+    with pytest.raises(ConfigurationError, match="ADMIN_IDS must be comma-separated"):
+        load_settings({
+            "TELEGRAM_BOT_TOKEN": "test-token",
+            "ADMIN_IDS": "not-a-number",
+        })
