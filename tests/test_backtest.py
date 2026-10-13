@@ -24,6 +24,7 @@ def test_signal_enters_at_next_open_and_hits_long_target():
     assert trade.exit_timestamp == 3
     assert trade.exit_reason == "target"
     assert trade.net_pnl == Decimal("4")
+    assert result.final_equity == Decimal("1004")
 
 
 def test_stop_wins_when_stop_and_target_touch_same_candle():
@@ -47,6 +48,7 @@ def test_fees_and_slippage_reduce_long_pnl():
         slippage_rate=Decimal("0.01")))
     assert result.trades[0].net_pnl < Decimal("4")
     assert result.total_fees > 0
+    assert result.final_equity == result.initial_equity + result.net_pnl
 
 
 def test_rejects_signal_on_final_candle():
