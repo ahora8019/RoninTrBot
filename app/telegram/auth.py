@@ -8,7 +8,7 @@ OWNER = "OWNER"
 ADMIN = "ADMIN"
 MEMBER = "MEMBER"
 
-PUBLIC_ACTIONS = frozenset({"home", "help", "status", "paper", "trades", "strategy"})
+PUBLIC_ACTIONS = frozenset({"home", "help", "status", "market", "paper", "trades", "strategy"})
 ADMIN_ACTIONS = frozenset({"settings", "management"})
 
 
