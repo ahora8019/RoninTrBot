@@ -21,15 +21,25 @@ def test_long_spot_plan_uses_atr_stop_and_risk_budget():
 
 
 def test_short_futures_plan_is_theoretical_and_separate():
+    # Default limits cap leverage at 1x; futures leverage must be granted
+    # explicitly through policy limits (never by loosening engine defaults).
+    limits = RiskLimits(max_leverage=Decimal("2"))
     plan = build_risk_plan(
         equity=1000, entry=100, atr=2, direction="short",
-        market_type="futures", symbol="eth_usdt", leverage=2,
-        limits=RiskLimits(max_leverage=Decimal("3")),
+        market_type="futures", symbol="eth_usdt", leverage=2, limits=limits,
     )
     assert plan.market_type == "futures"
     assert plan.stop_loss == Decimal("104")
     assert plan.take_profit == Decimal("92")
     assert plan.eligible
+
+
+def test_futures_leverage_requires_explicit_policy_allowance():
+    with pytest.raises(ValueError, match="leverage"):
+        build_risk_plan(
+            equity=1000, entry=100, atr=2, direction="short",
+            market_type="futures", symbol="eth_usdt", leverage=2,
+        )
 
 
 def test_spot_short_is_rejected():
