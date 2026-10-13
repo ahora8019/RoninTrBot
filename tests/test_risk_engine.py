@@ -24,6 +24,7 @@ def test_short_futures_plan_is_theoretical_and_separate():
     plan = build_risk_plan(
         equity=1000, entry=100, atr=2, direction="short",
         market_type="futures", symbol="eth_usdt", leverage=2,
+        limits=RiskLimits(max_leverage=Decimal("3")),
     )
     assert plan.market_type == "futures"
     assert plan.stop_loss == Decimal("104")
