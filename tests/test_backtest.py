@@ -83,3 +83,17 @@ def test_boolean_intent_timestamp_key_is_rejected():
     intent = TradeIntent(1, "long", Decimal("1"), Decimal("2"), Decimal("4"))
     with pytest.raises(ValueError, match="integer Unix timestamps"):
         run_backtest(data, {True: intent})
+
+
+def test_drawdown_includes_unrealized_intratrade_loss():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 100, 101, 89, 90),
+            candle(4, 100, 105, 95, 100)]
+    result = run_backtest(data, {1: TradeIntent(
+        1, "long", Decimal("1"), Decimal("20"), Decimal("40"))},
+        BacktestConfig(initial_equity=Decimal("1000"), fee_rate=Decimal("0"),
+                       slippage_rate=Decimal("0")))
+    assert result.trade_count == 1
+    assert result.trades[0].net_pnl == Decimal("0")
+    assert result.max_drawdown_fraction >= Decimal("0.09")
