@@ -43,12 +43,18 @@ class BacktestConfig:
 
 @dataclass(frozen=True, slots=True)
 class TradeIntent:
-    """A signal at a candle close; distances are absolute price units."""
+    """A signal at a candle close; distances are absolute price units.
+
+    `market_type` keeps the simulated market explicit, mirroring the risk
+    engine: shorts require `market_type="futures"`; spot shorts are rejected.
+    The default is fail-closed spot.
+    """
     signal_timestamp: int
     direction: str
     quantity: Decimal
     stop_distance: Decimal
     target_distance: Decimal
+    market_type: str = "spot"
 
     def __post_init__(self) -> None:
         if isinstance(self.signal_timestamp, bool) or not isinstance(self.signal_timestamp, int):
@@ -57,6 +63,12 @@ class TradeIntent:
         if direction not in {"long", "short"}:
             raise ValueError("direction must be 'long' or 'short'")
         object.__setattr__(self, "direction", direction)
+        market = self.market_type.strip().lower() if isinstance(self.market_type, str) else ""
+        if market not in {"spot", "futures"}:
+            raise ValueError("market_type must be 'spot' or 'futures'")
+        object.__setattr__(self, "market_type", market)
+        if market == "spot" and direction == "short":
+            raise ValueError("spot short intents are unsupported")
         for field in ("quantity", "stop_distance", "target_distance"):
             value = _d(getattr(self, field), field)
             object.__setattr__(self, field, value)
@@ -173,6 +185,7 @@ def run_backtest(
                 net = gross - fees
                 # Entry fee was deducted when the position opened; realize only gross PnL minus exit fee here.
                 equity += gross - exit_fee
+                total_fees += exit_fee
                 trades.append(ClosedTrade(direction, int(position["signal_timestamp"]),
                     int(position["entry_timestamp"]), candle.timestamp, entry, slipped_exit,
                     qty, gross, fees, net, reason))
@@ -240,5 +253,6 @@ def run_backtest(
          "If stop and target are both touched in one candle, stop is assumed first.",
          "Open positions are closed at the final candle close with slippage.",
          "Maximum drawdown includes candle-close mark-to-market estimates for open positions.",
+         "Short simulations have no margin model; a gap-up exit can push equity below zero.",
          "Results exclude funding, borrow costs, spread variability, and partial fills."),
     )
