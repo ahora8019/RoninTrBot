@@ -51,7 +51,7 @@ def validate_candles(candles: Iterable[Candle], *, min_count: int = 1) -> tuple[
     """Return candles in order, rejecting duplicate or non-increasing timestamps."""
     result = tuple(candles)
     if len(result) < min_count:
-        raise ValueError(f"at least {min_count} candles are required")
+        raise ValueError(f"not enough candles: at least {min_count} are required")
     previous = -1
     for candle in result:
         if not isinstance(candle, Candle):
