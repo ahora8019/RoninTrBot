@@ -14,6 +14,7 @@ class ConfigurationError(ValueError):
 class Settings:
     telegram_bot_token: str
     owner_ids: tuple[int, ...]
+    admin_ids: tuple[int, ...] = ()
     trading_mode: str = "paper"
     live_trading_enabled: bool = False
     scan_interval_seconds: int = 300
@@ -49,8 +50,11 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
         raise ConfigurationError("TELEGRAM_BOT_TOKEN must not contain whitespace")
 
     owner_ids = _parse_owner_ids(env.get("OWNER_IDS", ""))
+    admin_ids = _parse_owner_ids(env.get("ADMIN_IDS", ""))
+    if set(owner_ids) & set(admin_ids):
+        raise ConfigurationError("OWNER_IDS and ADMIN_IDS must not overlap")
     requested_mode = env.get("TRADING_MODE", "paper").strip().lower()
     if requested_mode != "paper":
         raise ConfigurationError("Only TRADING_MODE=paper is supported in this stage")
 
-    return Settings(telegram_bot_token=token, owner_ids=owner_ids)
+    return Settings(telegram_bot_token=token, owner_ids=owner_ids, admin_ids=admin_ids)
