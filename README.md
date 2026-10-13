@@ -53,3 +53,12 @@ Python-first Telegram trading assistant for LBank, developed in controlled stage
 - Live trading remains disabled; no exchange order placement or engine control is implemented in this stage.
 - Automated tests cover role resolution and authorization policy.
 - Do not start polling with the existing bot token until the current Cloudflare webhook/polling setup is deliberately migrated; Telegram does not support simultaneous webhook and long-polling updates for the same bot.
+
+## Stage 3 acceptance criteria
+
+- Fetch public LBank V2 spot K-line data for `15m`, `1h`, and `4h` using the documented `GET /v2/kline.do` endpoint.
+- Normalize OHLCV values to immutable candle records with decimal prices and Unix-second timestamps.
+- Reject malformed payloads, invalid symbols/intervals/limits, duplicate or future timestamps, stale latest candles, non-finite values, and inconsistent OHLC values.
+- Use bounded retries for transient HTTP/network failures and a configurable per-client minimum request interval.
+- Keep this adapter public and read-only: no API keys, account endpoints, or order placement.
+- Automated tests use injected fake transports; tests do not require exchange credentials or live network access.
