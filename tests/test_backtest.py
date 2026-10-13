@@ -68,3 +68,18 @@ def test_config_rejects_invalid_costs():
 def test_invalid_intent_quantity_is_rejected():
     with pytest.raises(ValueError):
         TradeIntent(1, "long", Decimal("0"), Decimal("2"), Decimal("4"))
+
+
+def test_invalid_intent_record_fails_with_type_error():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100)]
+    with pytest.raises(TypeError, match="TradeIntent"):
+        run_backtest(data, {1: object()})
+
+
+def test_boolean_intent_timestamp_key_is_rejected():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100)]
+    intent = TradeIntent(1, "long", Decimal("1"), Decimal("2"), Decimal("4"))
+    with pytest.raises(ValueError, match="integer Unix timestamps"):
+        run_backtest(data, {True: intent})
