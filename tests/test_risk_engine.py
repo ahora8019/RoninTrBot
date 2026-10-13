@@ -24,6 +24,7 @@ def test_short_futures_plan_is_theoretical_and_separate():
     plan = build_risk_plan(
         equity=1000, entry=100, atr=2, direction="short",
         market_type="futures", symbol="eth_usdt", leverage=2,
+        limits=RiskLimits(max_leverage=Decimal("3")),
     )
     assert plan.market_type == "futures"
     assert plan.stop_loss == Decimal("104")
@@ -73,3 +74,9 @@ def test_position_size_is_capped_by_notional_limit():
                            market_type="spot", symbol="BTC_USDT", limits=limits)
     assert plan.notional <= Decimal("10")
     assert plan.quantity == Decimal("0.100000")
+
+
+def test_short_target_must_remain_positive():
+    with pytest.raises(ValueError, match="take-profit target"):
+        build_risk_plan(equity=1000, entry=100, atr=30, direction="short",
+                        market_type="futures", symbol="BTC_USDT")

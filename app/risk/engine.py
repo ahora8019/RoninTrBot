@@ -96,6 +96,8 @@ def build_risk_plan(
     stop = entry_d - stop_distance if side == "long" else entry_d + stop_distance
     target_distance = stop_distance * limits.reward_risk_ratio
     target = entry_d + target_distance if side == "long" else entry_d - target_distance
+    if target <= 0:
+        raise ValueError("take-profit target must be greater than zero")
 
     risk_budget = equity_d * limits.risk_fraction
     raw_quantity = risk_budget / stop_distance

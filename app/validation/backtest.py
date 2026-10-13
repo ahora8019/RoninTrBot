@@ -109,12 +109,17 @@ def run_backtest(
     data = validate_candles(candles, min_count=2)
     by_timestamp = {c.timestamp: i for i, c in enumerate(data)}
     for timestamp, intent in intents.items():
+        # Validate record type before dereferencing fields so malformed input
+        # fails with the documented TypeError rather than an incidental
+        # AttributeError. Reject bool keys even though bool is an int subtype.
+        if not isinstance(intent, TradeIntent):
+            raise TypeError("intents must contain TradeIntent records")
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+            raise ValueError("intent keys must be integer Unix timestamps")
         if timestamp not in by_timestamp or intent.signal_timestamp != timestamp:
             raise ValueError("every intent must match a candle timestamp and its key")
         if by_timestamp[timestamp] >= len(data) - 1:
             raise ValueError("the final candle cannot host a signal without a next candle")
-        if not isinstance(intent, TradeIntent):
-            raise TypeError("intents must contain TradeIntent records")
 
     equity = config.initial_equity
     peak = equity
@@ -176,6 +181,28 @@ def run_backtest(
                 if peak > 0:
                     max_drawdown = max(max_drawdown, (peak - equity) / peak)
 
+        # Track unrealized equity at each completed candle while a position is
+        # open. Do not mark a newly scheduled position on the signal candle:
+        # its entry is at the next candle's open.
+        if position is not None and int(position["entry_timestamp"]) <= candle.timestamp:
+            direction = str(position["direction"])
+            qty = position["quantity"]
+            entry = position["entry"]
+            assert isinstance(qty, Decimal) and isinstance(entry, Decimal)
+            mark_exit = candle.close * (
+                Decimal("1") - config.slippage_rate
+                if direction == "long" else Decimal("1") + config.slippage_rate
+            )
+            unrealized_gross = (
+                (mark_exit - entry) * qty
+                if direction == "long" else (entry - mark_exit) * qty
+            )
+            estimated_exit_fee = mark_exit * qty * config.fee_rate
+            marked_equity = equity + unrealized_gross - estimated_exit_fee
+            peak = max(peak, marked_equity)
+            if peak > 0:
+                max_drawdown = max(max_drawdown, (peak - marked_equity) / peak)
+
         intent = intents.get(candle.timestamp)
         if position is None and intent is not None:
             next_candle = data[i + 1]
@@ -212,5 +239,6 @@ def run_backtest(
          "Signals execute no earlier than the next candle open.",
          "If stop and target are both touched in one candle, stop is assumed first.",
          "Open positions are closed at the final candle close with slippage.",
+         "Maximum drawdown includes candle-close mark-to-market estimates for open positions.",
          "Results exclude funding, borrow costs, spread variability, and partial fills."),
     )

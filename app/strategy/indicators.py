@@ -122,7 +122,10 @@ def analyze_timeframe(timeframe: str, candles: Iterable[Candle]) -> TimeframeAna
     """Score one timeframe with transparent trend and momentum rules."""
     if timeframe not in SUPPORTED_TIMEFRAMES:
         raise ValueError(f"timeframe must be one of {', '.join(SUPPORTED_TIMEFRAMES)}")
-    data = validate_candles(candles, min_count=51)
+    raw_data = tuple(candles)
+    if len(raw_data) < 51:
+        raise ValueError("not enough candles; at least 51 are required for indicator warm-up")
+    data = validate_candles(raw_data, min_count=51)
     closes = [c.close for c in data]
     fast, slow = sma(closes, 9), sma(closes, 21)
     momentum, volatility = rsi(closes, 14), atr(data, 14)
