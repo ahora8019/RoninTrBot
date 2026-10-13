@@ -51,6 +51,46 @@ def test_fees_and_slippage_reduce_long_pnl():
     assert result.final_equity == result.initial_equity + result.net_pnl
 
 
+def test_total_fees_include_entry_and_exit_fees():
+    # Regression: total_fees previously accumulated entry fees only.
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 100, 106, 99, 104)]
+    result = run_backtest(data, {1: TradeIntent(1, "long", Decimal("1"),
+        Decimal("2"), Decimal("4"))}, BacktestConfig(
+        initial_equity=Decimal("1000"), fee_rate=Decimal("0.01"),
+        slippage_rate=Decimal("0")))
+    expected = sum(trade.fees for trade in result.trades)
+    assert result.total_fees == expected
+    # Deterministic expectation: entry fee 100*1*0.01 = 1, exit fee 104*1*0.01 = 1.04.
+    assert result.total_fees == Decimal("2.04")
+
+
+def test_spot_short_intent_is_rejected():
+    with pytest.raises(ValueError, match="spot short"):
+        TradeIntent(1, "short", Decimal("1"), Decimal("2"), Decimal("4"))
+
+
+def test_short_requires_explicit_futures_market():
+    intent = TradeIntent(1, "short", Decimal("1"), Decimal("2"), Decimal("4"),
+                         market_type="FUTURES")
+    assert intent.market_type == "futures"
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 100, 101, 93, 96)]  # high stays below the 102 stop; low touches the 96 target
+    result = run_backtest(data, {1: intent}, BacktestConfig(
+        initial_equity=Decimal("1000"), fee_rate=Decimal("0"), slippage_rate=Decimal("0")))
+    assert result.trades[0].exit_reason == "target"
+    assert result.trades[0].net_pnl == Decimal("4")
+    assert result.final_equity == result.initial_equity + result.net_pnl
+
+
+def test_invalid_intent_market_type_is_rejected():
+    with pytest.raises(ValueError, match="market_type"):
+        TradeIntent(1, "long", Decimal("1"), Decimal("2"), Decimal("4"),
+                    market_type="margin")
+
+
 def test_rejects_signal_on_final_candle():
     data = [candle(1, 100, 101, 99, 100), candle(2, 100, 101, 99, 100)]
     intent = TradeIntent(2, "long", Decimal("1"), Decimal("2"), Decimal("4"))
