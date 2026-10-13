@@ -1,7 +1,14 @@
+import asyncio
+from decimal import Decimal
+from types import SimpleNamespace
+from unittest.mock import AsyncMock
+
 from telegram.ext import CommandHandler
 
 from app.core.config import Settings
 from app.main import build_application
+from app.market_data.lbank import Candle
+from app.telegram.handlers import callback_handler
 
 
 def test_expected_telegram_commands_are_registered():
@@ -18,14 +25,7 @@ def test_expected_telegram_commands_are_registered():
         if isinstance(handler, CommandHandler)
         for command in handler.commands
     }
-    assert {"start", "panel", "status", "help"}.issubset(commands)
-
-
-import asyncio
-from types import SimpleNamespace
-from unittest.mock import AsyncMock
-
-from app.telegram.handlers import callback_handler
+    assert {"start", "panel", "status", "market", "help"}.issubset(commands)
 
 
 def test_member_cannot_open_admin_settings_even_with_forged_callback():
@@ -73,3 +73,72 @@ def test_admin_can_open_settings_callback():
     query.answer.assert_awaited_once_with()
     query.edit_message_text.assert_awaited_once()
     assert "Live execution: DISABLED" in query.edit_message_text.await_args.args[0]
+
+
+def test_member_can_open_market_callback_and_get_read_only_candles():
+    query = SimpleNamespace(
+        data="market",
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=999),
+    )
+    settings = Settings(
+        telegram_bot_token="123456:ABCDEF1234567890abcdef",
+        owner_ids=(123,),
+        admin_ids=(456,),
+    )
+    candles = [
+        Candle(1_800_000_000, Decimal("100"), Decimal("110"), Decimal("90"), Decimal("105"), Decimal("5")),
+        Candle(1_800_000_900, Decimal("105"), Decimal("112"), Decimal("101"), Decimal("108"), Decimal("6")),
+    ]
+    market_client = SimpleNamespace(fetch_ohlcv=lambda symbol, interval, limit: candles)
+    context = SimpleNamespace(
+        application=SimpleNamespace(
+            bot_data={"settings": settings, "market_data_client": market_client}
+        )
+    )
+
+    asyncio.run(callback_handler(update, context))
+
+    query.answer.assert_awaited_once_with()
+    query.edit_message_text.assert_awaited_once()
+    report = query.edit_message_text.await_args.args[0]
+    assert "LBank Spot — BTC_USDT (15m)" in report
+    assert "Close: 108" in report
+    assert "order execution is disabled" in report
+
+
+def test_invalid_market_data_request_does_not_call_exchange():
+    query = SimpleNamespace(
+        data="market",
+        answer=AsyncMock(),
+        edit_message_text=AsyncMock(),
+    )
+    update = SimpleNamespace(
+        callback_query=query,
+        effective_user=SimpleNamespace(id=999),
+    )
+    settings = Settings(
+        telegram_bot_token="123456:ABCDEF1234567890abcdef",
+        owner_ids=(123,),
+        admin_ids=(456,),
+    )
+    market_client = SimpleNamespace(fetch_ohlcv=AsyncMock())
+    context = SimpleNamespace(
+        application=SimpleNamespace(
+            bot_data={"settings": settings, "market_data_client": market_client}
+        )
+    )
+
+    # The callback uses a fixed, valid default pair; the fake adapter returns no data
+    # by raising a validation-shaped error, which must be handled without crashing.
+    from app.market_data.lbank import MarketDataValidationError
+    market_client.fetch_ohlcv = lambda *args: (_ for _ in ()).throw(MarketDataValidationError("bad payload"))
+
+    asyncio.run(callback_handler(update, context))
+
+    assert "temporarily unavailable" in query.edit_message_text.await_args.args[0]
+    assert "No trading action was taken" in query.edit_message_text.await_args.args[0]

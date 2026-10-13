@@ -15,6 +15,7 @@ def test_public_actions_allowed_for_all_known_roles():
     for role in (OWNER, ADMIN, MEMBER):
         assert action_allowed("status", role)
         assert action_allowed("paper", role)
+        assert action_allowed("market", role)
 
 
 def test_management_actions_require_admin_or_owner():
