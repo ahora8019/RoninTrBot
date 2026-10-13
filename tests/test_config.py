@@ -31,3 +31,22 @@ def test_rejects_duplicate_owner_ids():
 def test_live_mode_is_not_available_in_foundation_stage():
     with pytest.raises(ConfigurationError, match="Only TRADING_MODE=paper"):
         load_settings({"TELEGRAM_BOT_TOKEN": "test-token", "TRADING_MODE": "live"})
+
+
+def test_loads_admin_ids_separately():
+    settings = load_settings({
+        "TELEGRAM_BOT_TOKEN": "test-token",
+        "OWNER_IDS": "123",
+        "ADMIN_IDS": "456,789",
+    })
+    assert settings.owner_ids == (123,)
+    assert settings.admin_ids == (456, 789)
+
+
+def test_rejects_overlap_between_owner_and_admin_ids():
+    with pytest.raises(ConfigurationError, match="must not overlap"):
+        load_settings({
+            "TELEGRAM_BOT_TOKEN": "test-token",
+            "OWNER_IDS": "123",
+            "ADMIN_IDS": "123,456",
+        })
