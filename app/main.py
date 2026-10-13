@@ -33,7 +33,15 @@ def main() -> None:
     configure_logging()
     try:
         settings = load_settings()
-        if asyncio.run(_webhook_is_configured(settings.telegram_bot_token)):
+        try:
+            webhook_active = asyncio.run(_webhook_is_configured(settings.telegram_bot_token))
+        except Exception as exc:  # pre-flight network/transport failure: fail closed
+            logger.error(
+                "Startup refused: webhook pre-flight check failed (%s). Fix connectivity, then retry.",
+                type(exc).__name__,
+            )
+            raise SystemExit(3) from None
+        if webhook_active:
             logger.error(
                 "Startup refused: this bot already has a Telegram webhook. "
                 "Migrate the existing Cloudflare webhook deliberately before enabling polling."
