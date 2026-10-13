@@ -7,7 +7,6 @@ The public V2 K-line endpoint is documented at https://www.lbank.com/docs/.
 from __future__ import annotations
 
 import json
-import math
 import re
 import threading
 import time
