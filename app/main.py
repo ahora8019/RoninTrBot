@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
+from telegram import Bot
 from telegram.ext import Application
 
-from app.core.config import ConfigurationError, load_settings
+from app.core.config import ConfigurationError, Settings, load_settings
 from app.core.logging_setup import configure_logging
 from app.telegram.handlers import register_handlers
 
 logger = logging.getLogger(__name__)
 
 
-def build_application() -> Application:
-    settings = load_settings()
+async def _webhook_is_configured(token: str) -> bool:
+    """Check current Telegram transport without changing webhook configuration."""
+    async with Bot(token=token) as bot:
+        info = await bot.get_webhook_info()
+        return bool(info.url)
+
+
+def build_application(settings: Settings | None = None) -> Application:
+    settings = settings or load_settings()
     application = Application.builder().token(settings.telegram_bot_token).build()
     register_handlers(application, settings)
     return application
@@ -23,7 +32,14 @@ def build_application() -> Application:
 def main() -> None:
     configure_logging()
     try:
-        application = build_application()
+        settings = load_settings()
+        if asyncio.run(_webhook_is_configured(settings.telegram_bot_token)):
+            logger.error(
+                "Startup refused: this bot already has a Telegram webhook. "
+                "Migrate the existing Cloudflare webhook deliberately before enabling polling."
+            )
+            raise SystemExit(3)
+        application = build_application(settings)
     except ConfigurationError as exc:
         logger.error("Invalid runtime configuration: %s", exc)
         raise SystemExit(2) from None
