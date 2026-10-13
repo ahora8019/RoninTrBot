@@ -13,9 +13,9 @@ from app.telegram.auth import ADMIN, OWNER, action_allowed, resolve_role
 logger = logging.getLogger(__name__)
 
 PAGE_TEXT = {
-    "home": "RoninTrBot v1.0\\nControl panel is online. Trading is not connected.",
+    "home": "RoninTrBot v1.0\nControl panel is online. Trading is not connected.",
     "help": "Commands: /start, /panel, /status, /help",
-    "status": "Bot interface: ONLINE\\nMarket data: NOT CONNECTED\\nStrategy: NOT CONNECTED\\nRisk engine: NOT CONNECTED\\nExecution: DISABLED",
+    "status": "Bot interface: ONLINE\nMarket data: NOT CONNECTED\nStrategy: NOT CONNECTED\nRisk engine: NOT CONNECTED\nExecution: DISABLED",
     "paper": "Paper Trading is not connected yet. No trades are simulated.",
     "trades": "Trade data is not connected yet.",
     "strategy": "Strategy engine is not connected yet.",
@@ -45,7 +45,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
     role = _role(update, settings)
     if update.effective_message:
         await update.effective_message.reply_text(
-            f"🥷 RoninTrBot v1.0\\nRole: {role}\\nLive trading: DISABLED",
+            f"🥷 RoninTrBot v1.0\nRole: {role}\nLive trading: DISABLED",
             reply_markup=_keyboard(role),
         )
 
