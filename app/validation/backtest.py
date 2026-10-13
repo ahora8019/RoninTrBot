@@ -109,12 +109,17 @@ def run_backtest(
     data = validate_candles(candles, min_count=2)
     by_timestamp = {c.timestamp: i for i, c in enumerate(data)}
     for timestamp, intent in intents.items():
+        # Validate record type before dereferencing fields so malformed input
+        # fails with the documented TypeError rather than an incidental
+        # AttributeError. Reject bool keys even though bool is an int subtype.
+        if not isinstance(intent, TradeIntent):
+            raise TypeError("intents must contain TradeIntent records")
+        if isinstance(timestamp, bool) or not isinstance(timestamp, int):
+            raise ValueError("intent keys must be integer Unix timestamps")
         if timestamp not in by_timestamp or intent.signal_timestamp != timestamp:
             raise ValueError("every intent must match a candle timestamp and its key")
         if by_timestamp[timestamp] >= len(data) - 1:
             raise ValueError("the final candle cannot host a signal without a next candle")
-        if not isinstance(intent, TradeIntent):
-            raise TypeError("intents must contain TradeIntent records")
 
     equity = config.initial_equity
     peak = equity
