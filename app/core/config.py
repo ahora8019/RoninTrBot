@@ -39,8 +39,8 @@ def _parse_ids(raw: str, variable_name: str) -> tuple[int, ...]:
 def load_settings(environ: dict[str, str] | None = None) -> Settings:
     """Load settings from the provided mapping or process environment.
 
-    The token is required for runtime startup. Trading is forced to paper mode
-    in this foundation stage; live execution is not configurable here.
+    The token and at least one owner ID are required for runtime startup.
+    Trading is forced to paper mode; live execution is not configurable here.
     """
     env = os.environ if environ is None else environ
     token = env.get("TELEGRAM_BOT_TOKEN", "").strip()
@@ -51,6 +51,8 @@ def load_settings(environ: dict[str, str] | None = None) -> Settings:
 
     owner_ids = _parse_ids(env.get("OWNER_IDS", ""), "OWNER_IDS")
     admin_ids = _parse_ids(env.get("ADMIN_IDS", ""), "ADMIN_IDS")
+    if not owner_ids:
+        raise ConfigurationError("OWNER_IDS must contain at least one owner Telegram user ID")
     if set(owner_ids) & set(admin_ids):
         raise ConfigurationError("OWNER_IDS and ADMIN_IDS must not overlap")
     requested_mode = env.get("TRADING_MODE", "paper").strip().lower()
