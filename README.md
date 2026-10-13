@@ -43,3 +43,13 @@ Python-first Telegram trading assistant for LBank, developed in controlled stage
 - Automatic strategy changes or self-modifying behavior.
 - Multi-exchange support beyond the agreed LBank target.
 - Live trading before validation and explicit approval.
+
+## Stage 2 acceptance criteria
+
+- Telegram commands `/start`, `/panel`, `/status`, and `/help` are registered.
+- Role resolution is based on numeric Telegram user IDs configured through `OWNER_IDS` and `ADMIN_IDS`; owners take precedence and overlapping lists are rejected.
+- Callback actions are authorized server-side; unknown actions fail closed.
+- The interface clearly marks market data, strategy, risk, and execution as disconnected until their later stages.
+- Live trading remains disabled; no exchange order placement or engine control is implemented in this stage.
+- Automated tests cover role resolution and authorization policy.
+- Do not start polling with the existing bot token until the current Cloudflare webhook/polling setup is deliberately migrated; Telegram does not support simultaneous webhook and long-polling updates for the same bot.
