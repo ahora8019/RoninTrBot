@@ -62,3 +62,30 @@ Python-first Telegram trading assistant for LBank, developed in controlled stage
 - Use bounded retries for transient HTTP/network failures and a configurable per-client minimum request interval.
 - Keep this adapter public and read-only: no API keys, account endpoints, or order placement.
 - Automated tests use injected fake transports; tests do not require exchange credentials or live network access.
+
+---
+
+## Current state (2026-10-14, verified)
+
+- **Suite:** 208+ unit/integration tests incl. Python↔JS parity — `python -m pytest`.
+- **What's real:** read-only LBank market data (fail-closed integrity), strategy (trend+breakout policies, regime router), risk engine as single choke point, hermetic paper engine with decision log/halt/snapshot-restore, OOS + walk-forward validation, documented real-data studies.
+- **Edge:** the deployed Telegram control-panel worker lives in `workers/ronin-panel/` (versioned here; analysis surface is a CI-parity-checked port of the Python core).
+- **Never:** live order placement, real exchange credentials, live-capital use. All trading semantics are paper/simulation by design.
+
+## Development
+
+```bash
+python3 -m venv .venv && . .venv/bin/activate
+pip install -e '.[test]'          # dev path
+pip install -r requirements-lock.txt && pip install -e . --no-deps   # CI/reproducible path
+python -m pytest                  # full suite (requires node for parity tests)
+node --check workers/ronin-panel/worker.js workers/ronin-panel/analysis.js
+```
+
+## Deployment
+
+Worker deployment is CI-driven: `.github/workflows/deploy-worker.yml` (requires the
+`CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` GitHub Actions secrets — the workflow
+fails loudly when they are missing). Post-deploy verification is
+`scripts/smoke_test.py`. See `docs/deployment/cloudflare.md` and `docs/deployment/rollback.md`.
+Architecture docs live under `docs/architecture/` (current-state, deployment decision).

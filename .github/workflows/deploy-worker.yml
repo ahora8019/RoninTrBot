@@ -1,0 +1,54 @@
+name: Deploy Worker
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: ["workers/**", ".github/workflows/deploy-worker.yml"]
+
+permissions:
+  contents: read
+
+env:
+  ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+  API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+
+jobs:
+  secrets-present:
+    runs-on: ubuntu-latest
+    outputs: { ready: ${{ steps.check.outputs.ready }} }
+    steps:
+      - id: check
+        run: |
+          if [ -z "${{ secrets.CLOUDFLARE_API_TOKEN }}" ] || [ -z "${{ secrets.CLOUDFLARE_ACCOUNT_ID}}" ]; then
+            echo "BLOCKED: CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID are not configured as GitHub Actions secrets." >&2
+            echo "Deployment cannot proceed without real credentials; failing loudly instead of faking a deploy." >&2
+            exit 1
+          fi
+          echo "ready=yes" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    needs: secrets-present
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy ronin-panel at this commit
+        run: |
+          npm install -g wrangler@3
+          cd workers/ronin-panel
+          npx wrangler deploy --config wrangler.jsonc
+          echo "Deployed git SHA: $GITHUB_SHA"
+      - name: Post-deploy health verification (smoke)
+        run: |
+          pip install -r requirements-lock.txt
+          python scripts/smoke_test.py --base-url https://ronin-panel.ronintrb.workers.dev
+
+  rollback-note:
+    if: failure()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rollback pointer
+        run: |
+          echo "Deployment FAILED. Wrangler versions retain the previous deployment on Cloudflare;"
+          echo "recover with: npx wrangler deployments list && npx wrangler rollback --config workers/ronin-panel/wrangler.jsonc"
+          echo "See docs/deployment/rollback.md. Record the failing SHA: $GITHUB_SHA"

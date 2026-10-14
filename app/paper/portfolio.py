@@ -74,6 +74,9 @@ class PaperPosition:
     entry_fee: Decimal
 
 
+SNAPSHOT_SCHEMA_VERSION = 2  # bump on snapshot-format changes; restore() rejects unknown newer versions
+
+
 class PaperEngine:
     """Stateful paper portfolio. One position at a time, fail-closed decisions."""
 
@@ -301,6 +304,7 @@ class PaperEngine:
         position = self._position
         pending = self._pending
         return {
+            "schema_version": SNAPSHOT_SCHEMA_VERSION,
             "config": {
                 "initial_cash": str(self._config.initial_cash),
                 "fee_rate": str(self._config.fee_rate),
@@ -347,6 +351,14 @@ class PaperEngine:
         """Rebuild an engine from snapshot(); invalid snapshots fail closed."""
         if not isinstance(snapshot, dict):
             raise TypeError("snapshot must be the mapping produced by snapshot()")
+        # Schema-gated persistence: snapshots from a newer code version are
+        # never silently accepted (they could mis-read state after upgrades);
+        # version 1 = the pre-versioned format, treated as current here.
+        version = snapshot.get("schema_version", 1)
+        if not isinstance(version, int) or isinstance(version, bool) or version < 1:
+            raise ValueError("snapshot schema_version must be a positive integer")
+        if version > SNAPSHOT_SCHEMA_VERSION:
+            raise ValueError(f"snapshot schema_version {version} is newer than supported {SNAPSHOT_SCHEMA_VERSION}")
         try:
             config_raw = snapshot["config"]
             engine = cls(PaperConfig(

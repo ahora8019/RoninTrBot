@@ -1,0 +1,128 @@
+openapi: 3.0.3
+info:
+  title: RoninTrBot Internal API (Option-A target contract)
+  version: 0.1.0
+  description: |
+    DESIGN-FIRST contract for the future Python-core service behind a secure
+    HTTPS API (never deployed yet — see docs/architecture/deployment-architecture.md,
+    decision C/A). Everything is paper/simulation only; there are NO order
+    endpoints by design. Envelope, auth, idempotency, and error formats are
+    normative for any implementation.
+servers: []
+security:
+  - serviceAuth: []
+paths:
+  /v1/health:
+    get:
+      operationId: getHealth
+      summary: Liveness + readiness of the Python core.
+      responses:
+        "200": { $ref: "#/components/responses/health" }
+  /v1/status:
+    get:
+      operationId: getStatus
+      summary: Read-only engine status (version, commit, last market fetch, last paper cycle).
+      responses:
+        "200": { $ref: "#/components/responses/envelope" }
+  /v1/market/{symbol}/ohlcv:
+    get:
+      operationId: getMarketCandles
+      parameters:
+        - { name: symbol, in: path, required: true, schema: { type: string, pattern: "^[a-z]+_[a-z]+$" } }
+        - { name: interval, in: query, required: true, schema: { type: string, enum: ["15m", "1h", "4h"] } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1200, default: 200 } }
+      responses:
+        "200": { $ref: "#/components/responses/envelope" }
+        "422": { $ref: "#/components/responses/error" }
+  /v1/strategy/analysis:
+    get:
+      operationId: getStrategyAnalysis
+      parameters:
+        - { name: symbol, in: query, required: true, schema: { type: string } }
+        - { name: interval, in: query, required: true, schema: { type: string, enum: ["15m", "1h", "4h"] } }
+      responses:
+        "200": { $ref: "#/components/responses/envelope" }
+  /v1/paper/status:
+    get:
+      operationId: getPaperStatus
+      summary: Paper engine state (equity, open position, decisions tail, halted flag).
+      responses:
+        "200": { $ref: "#/components/responses/envelope" }
+  /v1/paper/session:
+    post:
+      operationId: runPaperSession
+      summary: Run a paper session replay. LAB-ONLY (403 outside lab environment).
+      parameters:
+        - { name: Idempotency-Key, in: header, required: true,
+            schema: { type: string, minLength: 8, maxLength: 128 },
+            description: Retries with the same key return the original result; never re-executes. }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [policy, candles_ref]
+              properties:
+                policy: { type: string, enum: ["trend", "breakout"] }
+                candles_ref: { type: string, description: "Server-side dataset handle; raw candle upload is never accepted." }
+      responses:
+        "200": { $ref: "#/components/responses/envelope" }
+        "403": { $ref: "#/components/responses/error" }
+  /v1/reports/{report_id}:
+    get:
+      operationId: getReport
+      parameters:
+        - { name: report_id, in: path, required: true, schema: { type: string } }
+      responses:
+        "200": { $ref: "#/components/responses/envelope" }
+        "404": { $ref: "#/components/responses/error" }
+components:
+  securitySchemes:
+    serviceAuth:
+      type: http
+      scheme: bearer
+      description: Service-to-service bearer (INTERNAL_API_SECRET). Never in URL/query.
+  schemas:
+    envelope:
+      type: object
+      required: [ok, request_id, data, error]
+      properties:
+        ok: { type: boolean }
+        request_id: { type: string, description: "Unique per request; echoed for correlation." }
+        data: { type: object, nullable: true }
+        error:
+          type: object
+          nullable: true
+          properties:
+            code: { type: string }
+            message: { type: string, description: "Safe text only; no stack traces, no secrets." }
+    healthData:
+      type: object
+      required: [status, version, commit]
+      properties:
+        status: { type: string, enum: [ok, degraded, down] }
+        version: { type: string }
+        commit: { type: string, description: "Short git SHA of the deployed build." }
+        stale_after_seconds: { type: integer, description: "Consumers must treat data older than this as stale." }
+  responses:
+    envelope:
+      description: Standard envelope.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/envelope" }
+    health:
+      description: Health payload.
+      content:
+        application/json:
+          schema:
+            allOf:
+              - $ref: "#/components/schemas/envelope"
+              - type: object
+                properties:
+                  data: { $ref: "#/components/schemas/healthData" }
+    error:
+      description: Error envelope.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/envelope" }
