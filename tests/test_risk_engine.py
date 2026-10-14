@@ -21,14 +21,25 @@ def test_long_spot_plan_uses_atr_stop_and_risk_budget():
 
 
 def test_short_futures_plan_is_theoretical_and_separate():
+    # Default limits cap leverage at 1x; futures leverage must be granted
+    # explicitly through policy limits (never by loosening engine defaults).
+    limits = RiskLimits(max_leverage=Decimal("2"))
     plan = build_risk_plan(
         equity=1000, entry=100, atr=2, direction="short",
-        market_type="futures", symbol="eth_usdt", leverage=2,
+        market_type="futures", symbol="eth_usdt", leverage=2, limits=limits,
     )
     assert plan.market_type == "futures"
     assert plan.stop_loss == Decimal("104")
     assert plan.take_profit == Decimal("92")
     assert plan.eligible
+
+
+def test_futures_leverage_requires_explicit_policy_allowance():
+    with pytest.raises(ValueError, match="leverage"):
+        build_risk_plan(
+            equity=1000, entry=100, atr=2, direction="short",
+            market_type="futures", symbol="eth_usdt", leverage=2,
+        )
 
 
 def test_spot_short_is_rejected():
@@ -73,3 +84,24 @@ def test_position_size_is_capped_by_notional_limit():
                            market_type="spot", symbol="BTC_USDT", limits=limits)
     assert plan.notional <= Decimal("10")
     assert plan.quantity == Decimal("0.100000")
+
+
+def test_short_target_must_remain_positive():
+    with pytest.raises(ValueError, match="take-profit target"):
+        build_risk_plan(equity=1000, entry=100, atr=30, direction="short",
+                        market_type="futures", symbol="BTC_USDT")
+
+
+def test_hard_leverage_cap_boundary_is_inclusive():
+    # 3x is the documented hard cap: exactly 3 must pass, anything above must fail.
+    limits = RiskLimits(max_leverage=Decimal("3"))
+    plan = build_risk_plan(equity=1000, entry=100, atr=2, direction="short",
+                           market_type="futures", symbol="BTC_USDT", leverage=3, limits=limits)
+    assert plan.eligible
+    with pytest.raises(ValueError, match="3x cap"):
+        RiskLimits(max_leverage=Decimal("3.1"))
+
+
+def test_notional_fraction_cannot_exceed_one():
+    with pytest.raises(ValueError, match="cannot exceed 1.0"):
+        RiskLimits(max_notional_fraction=Decimal("1.1"))

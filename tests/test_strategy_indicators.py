@@ -101,3 +101,47 @@ def test_all_three_timeframes_are_required():
     with pytest.raises(ValueError, match="exactly 15m, 1h, and 4h"):
         analyze_signal(symbol="BTC_USDT", market_type="spot",
                        candles_by_timeframe={"15m": candles_trending()})
+
+
+def test_rsi_flat_and_exact_mixed_windows():
+    flat = [Decimal("10")] * 16
+    assert rsi(flat, 14) == Decimal("50")
+    # Alternating +1/-1 changes over the last 4 closes: RS = 1 -> RSI = 50.
+    mixed = [Decimal("10"), Decimal("11"), Decimal("10"), Decimal("11"), Decimal("10")]
+    assert rsi(mixed, 4) == Decimal("50")
+
+
+def test_atr_exact_value():
+    data = [Candle(1, Decimal("100"), Decimal("102"), Decimal("99"), Decimal("101"), Decimal("1")),
+            Candle(2, Decimal("101"), Decimal("103"), Decimal("100"), Decimal("102"), Decimal("1")),
+            Candle(3, Decimal("102"), Decimal("104"), Decimal("101"), Decimal("103"), Decimal("1"))]
+    # True ranges: max(3, 2, 1) = 3 twice -> ATR(2) = 3 exactly.
+    assert atr(data, 2) == Decimal("3")
+
+
+def test_indicator_error_paths_for_insufficient_values():
+    with pytest.raises(ValueError, match="not enough values for SMA"):
+        sma([Decimal("1")], 2)
+    with pytest.raises(ValueError, match="not enough closes for RSI"):
+        rsi([Decimal("1")], 14)
+    with pytest.raises(ValueError, match="not enough candles for ATR"):
+        atr([], 14)
+
+
+def test_score_threshold_boundary_is_inclusive():
+    data = {tf: candles_trending("up") for tf in ("15m", "1h", "4h")}
+    at = analyze_signal(symbol="btc_usdt", market_type="spot", candles_by_timeframe=data, threshold=70)
+    above = analyze_signal(symbol="btc_usdt", market_type="spot", candles_by_timeframe=data, threshold=71)
+
+    assert at.score == 70  # 40 trend + 10 extended RSI + 20 contained ATR
+    assert at.eligible is True   # score == threshold passes (inclusive)
+    assert above.eligible is False
+    assert any("below threshold" in r for r in above.reasons)
+
+
+@pytest.mark.parametrize("bad", [True, -1, 101])
+def test_analyze_signal_rejects_invalid_threshold(bad):
+    data = {tf: candles_trending("up") for tf in ("15m", "1h", "4h")}
+    with pytest.raises(ValueError, match="threshold"):
+        analyze_signal(symbol="btc_usdt", market_type="spot",
+                       candles_by_timeframe=data, threshold=bad)
