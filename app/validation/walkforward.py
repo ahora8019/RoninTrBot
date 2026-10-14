@@ -27,6 +27,12 @@ from app.validation.splits import walk_forward_windows
 IntentFactory = Callable[[tuple[Candle, ...], tuple[int, ...]], Mapping[int, TradeIntent]]
 """Given train candles and allowed test timestamps, return test-segment intents."""
 
+StepFactory = Callable[[tuple[Candle, ...], int], "TradeIntent | None"]
+"""Given history (train + test candles up to AND INCLUDING the signal candle)
+and that candle's timestamp, return one intent for it or None. The history
+never contains later candles, so decisions use only information available at
+decision time; ``run_backtest`` still fills at the NEXT candle's open."""
+
 
 @dataclass(frozen=True, slots=True)
 class WindowResult:
@@ -84,6 +90,56 @@ def evaluate_walk_forward(
             f"(train_size={train_size}, test_size={test_size})"
         )
 
+    intent_maps = [factory(window.train, tuple(c.timestamp for c in window.test))
+                   for window in windows]
+    return _evaluate_windows(windows, intent_maps, config,
+                             extra_notes=("The intent factory receives only train candles and test timestamps, not test prices.",))
+
+
+def evaluate_walk_forward_steps(
+    candles: Iterable[Candle],
+    *,
+    factory: StepFactory,
+    train_size: int,
+    test_size: int,
+    step: int | None = None,
+    anchored: bool = True,
+    config: BacktestConfig = BacktestConfig(),
+) -> WalkForwardReport:
+    """Walk-forward evaluation for trailing-indicator strategies.
+
+    Unlike ``evaluate_walk_forward`` (whose factory sees only train prices),
+    here the factory is consulted once per test candle with the history up to
+    that candle — the standard anchored-training/rolling-prediction protocol.
+    Neither protocol ever reveals future candles. Raises ValueError if no full
+    window fits the data.
+    """
+    data = validate_candles(tuple(candles), min_count=1)
+    windows = walk_forward_windows(
+        data, train_size=train_size, test_size=test_size, step=step, anchored=anchored
+    )
+    if not windows:
+        raise ValueError(
+            f"no full walk-forward window fits {len(data)} candles "
+            f"(train_size={train_size}, test_size={test_size})"
+        )
+
+    intent_maps: list[Mapping[int, TradeIntent]] = []
+    for window in windows:
+        intents: dict[int, TradeIntent] = {}
+        history = list(window.train)
+        for test_candle in window.test[:-1]:  # last-candle intents have no next open
+            history.append(test_candle)  # signal candle's OHLC is known at decision time
+            emitted = factory(tuple(history), test_candle.timestamp)
+            if emitted is not None:
+                intents[test_candle.timestamp] = emitted
+        intent_maps.append(intents)
+    return _evaluate_windows(windows, intent_maps, config,
+                             extra_notes=("The step factory sees only candles up to the signal candle (no future prices).",))
+
+
+def _evaluate_windows(windows, intent_maps, config: BacktestConfig,
+                      *, extra_notes: tuple[str, ...]) -> WalkForwardReport:
     carried = config.initial_equity
     peak = carried
     max_drawdown = Decimal("0")
@@ -92,9 +148,7 @@ def evaluate_walk_forward(
     trades: list[ClosedTrade] = []
     total_fees = Decimal("0")
 
-    for window in windows:
-        allowed_timestamps = tuple(c.timestamp for c in window.test)
-        intents = factory(window.train, allowed_timestamps)
+    for window, intents in zip(windows, intent_maps):
         result = run_backtest(
             window.test,
             intents,
@@ -127,7 +181,6 @@ def evaluate_walk_forward(
         tuple(trades), tuple(raw_results),
         ("Offline simulation only; no exchange connection or orders.",
          "Each window is evaluated in chronological order with equity carried forward.",
-         "The intent factory receives only train candles and test timestamps, not test prices.",
          "Execution semantics (next-candle open, stop-first, fees, slippage) match run_backtest.",
-         "Overall max drawdown is computed on the chained equity-mark series."),
+         "Overall max drawdown is computed on the chained equity-mark series.") + extra_notes,
     )
