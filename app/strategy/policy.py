@@ -24,6 +24,12 @@ from app.validation.backtest import TradeIntent
 
 MIN_WARMUP_CANDLES = 51  # matches analyze_timeframe's requirement
 
+# Execution engines (backtest + paper) reject entries whose notional PLUS
+# entry fee exceeds their equity cap, so a policy using the default
+# max_notional_fraction=1.0 leaves zero fee headroom and can never fill when
+# the notional cap binds. Size with e.g. max_notional_fraction=0.95 to leave
+# room for fees, unless the risk budget (stop-based) binds before the cap.
+
 
 @dataclass(frozen=True, slots=True)
 class TrendPolicy:
