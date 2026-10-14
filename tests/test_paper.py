@@ -167,3 +167,26 @@ def test_paper_engine_has_no_exchange_or_network_dependency():
     source = inspect.getsource(app.paper) + inspect.getsource(module_source_container)
     for forbidden in ("urllib", "requests", "httpx", "socket", "telegram"):
         assert forbidden not in source, f"paper engine must stay hermetic (found {forbidden!r})"
+
+
+def test_snapshot_schema_version_gating():
+    from app.paper.portfolio import SNAPSHOT_SCHEMA_VERSION
+
+    engine = PaperEngine()
+    engine.step(candle(1, 100, 101, 99, 100), long_intent(1))
+    snapshot = engine.snapshot()
+    assert snapshot["schema_version"] == SNAPSHOT_SCHEMA_VERSION
+
+    # Pre-versioned snapshots (v1) restore for backward compatibility.
+    legacy = {k: v for k, v in snapshot.items() if k != "schema_version"}
+    PaperEngine.restore(legacy)
+
+    # Future versions fail closed.
+    newer = dict(snapshot, schema_version=SNAPSHOT_SCHEMA_VERSION + 1)
+    import pytest as _pytest
+    with _pytest.raises(ValueError, match="newer than supported"):
+        PaperEngine.restore(newer)
+
+    # Malformed version values fail closed.
+    with _pytest.raises(ValueError, match="positive integer"):
+        PaperEngine.restore(dict(snapshot, schema_version="2"))
