@@ -64,3 +64,10 @@ def test_invalid_admin_ids_name_the_admin_setting():
             "OWNER_IDS": "123",
             "ADMIN_IDS": "not-a-number",
         })
+
+
+def test_error_messages_never_echo_the_token_secret():
+    decorated_token = "abc def"
+    with pytest.raises(ConfigurationError) as excinfo:
+        load_settings({"TELEGRAM_BOT_TOKEN": decorated_token, "OWNER_IDS": "123"})
+    assert decorated_token not in str(excinfo.value)

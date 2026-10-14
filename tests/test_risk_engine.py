@@ -90,3 +90,18 @@ def test_short_target_must_remain_positive():
     with pytest.raises(ValueError, match="take-profit target"):
         build_risk_plan(equity=1000, entry=100, atr=30, direction="short",
                         market_type="futures", symbol="BTC_USDT")
+
+
+def test_hard_leverage_cap_boundary_is_inclusive():
+    # 3x is the documented hard cap: exactly 3 must pass, anything above must fail.
+    limits = RiskLimits(max_leverage=Decimal("3"))
+    plan = build_risk_plan(equity=1000, entry=100, atr=2, direction="short",
+                           market_type="futures", symbol="BTC_USDT", leverage=3, limits=limits)
+    assert plan.eligible
+    with pytest.raises(ValueError, match="3x cap"):
+        RiskLimits(max_leverage=Decimal("3.1"))
+
+
+def test_notional_fraction_cannot_exceed_one():
+    with pytest.raises(ValueError, match="cannot exceed 1.0"):
+        RiskLimits(max_notional_fraction=Decimal("1.1"))

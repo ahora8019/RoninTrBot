@@ -61,3 +61,13 @@ def test_invalid_market_type_is_rejected_before_network():
 def test_spot_client_is_required():
     with pytest.raises(ValueError, match="spot_client"):
         MarketDataRouter(spot_client=None)
+
+
+def test_router_accepts_market_type_enum_directories_input():
+    from app.market_data.types import MarketType
+    spot = FakeClient("spot")
+    futures = FakeClient("futures")
+    router = MarketDataRouter(spot_client=spot, futures_client=futures)
+
+    assert router.fetch_ohlcv(MarketType.SPOT, "btc_usdt", "15m", 5) == [("spot", "btc_usdt", "15m", 5)]
+    assert router.fetch_ohlcv(MarketType.FUTURES, "btc_usdt", "15m", 5) == [("futures", "btc_usdt", "15m", 5)]

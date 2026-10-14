@@ -137,3 +137,59 @@ def test_drawdown_includes_unrealized_intratrade_loss():
     assert result.trade_count == 1
     assert result.trades[0].net_pnl == Decimal("0")
     assert result.max_drawdown_fraction >= Decimal("0.009")
+
+
+def test_intent_key_must_match_its_signal_timestamp():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 100, 101, 99, 100)]
+    with pytest.raises(ValueError, match="must match a candle timestamp and its key"):
+        run_backtest(data, {1: TradeIntent(2, "long", Decimal("1"), Decimal("2"), Decimal("4"))})
+
+
+def test_signals_are_ignored_while_a_position_is_open():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 100, 101, 99, 100),
+            candle(4, 100, 101, 99, 100),
+            candle(5, 100, 101, 99, 101)]
+    intents = {1: TradeIntent(1, "long", Decimal("1"), Decimal("20"), Decimal("40")),
+               3: TradeIntent(3, "long", Decimal("1"), Decimal("20"), Decimal("40"))}
+    result = run_backtest(data, intents, BacktestConfig(
+        fee_rate=Decimal("0"), slippage_rate=Decimal("0")))
+    assert result.trade_count == 1
+    assert result.trades[0].signal_timestamp == 1
+    assert result.trades[0].exit_reason == "end_of_data"
+
+
+def test_long_stop_gap_exits_at_the_open():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 96, 97, 95, 96)]  # opens below the 98 stop
+    result = run_backtest(data, {1: TradeIntent(1, "long", Decimal("1"), Decimal("2"), Decimal("4"))},
+                          BacktestConfig(fee_rate=Decimal("0"), slippage_rate=Decimal("0")))
+    assert result.trades[0].exit_reason == "stop_gap"
+    assert result.trades[0].exit_price == Decimal("96")
+    assert result.trades[0].net_pnl == Decimal("-4")
+
+
+def test_long_target_gap_exits_at_the_open():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 106, 107, 105, 106)]  # opens above the 104 target
+    result = run_backtest(data, {1: TradeIntent(1, "long", Decimal("1"), Decimal("2"), Decimal("4"))},
+                          BacktestConfig(fee_rate=Decimal("0"), slippage_rate=Decimal("0")))
+    assert result.trades[0].exit_reason == "target_gap"
+    assert result.trades[0].net_pnl == Decimal("6")
+
+
+def test_short_futures_target_gap_exits_at_the_open():
+    data = [candle(1, 100, 101, 99, 100),
+            candle(2, 100, 101, 99, 100),
+            candle(3, 94, 95, 93, 94)]  # opens below the 96 target
+    intent = TradeIntent(1, "short", Decimal("1"), Decimal("2"), Decimal("4"),
+                         market_type="futures")
+    result = run_backtest(data, {1: intent},
+                          BacktestConfig(fee_rate=Decimal("0"), slippage_rate=Decimal("0")))
+    assert result.trades[0].exit_reason == "target_gap"
+    assert result.trades[0].net_pnl == Decimal("6")
