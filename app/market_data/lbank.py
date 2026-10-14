@@ -124,6 +124,7 @@ class LBankMarketDataClient:
         self._monotonic = monotonic
         self._rate_lock = threading.Lock()
         self._last_request_at: float | None = None
+        self.last_skipped_rows: int = 0
 
     def _respect_rate_limit(self) -> None:
         with self._rate_lock:
@@ -150,7 +151,8 @@ class LBankMarketDataClient:
                 self._sleep(min(0.25 * (2**attempt), 2.0))
         raise MarketDataError("LBank request exhausted retries")
 
-    def fetch_ohlcv(self, symbol: str, interval: str, limit: int = 200) -> list[Candle]:
+    def fetch_ohlcv(self, symbol: str, interval: str, limit: int = 200,
+                    *, on_invalid: str = "raise") -> list[Candle]:
         """Fetch up to `limit` latest candles, ordered oldest-to-newest and validated.
 
         Supported intervals are 15m, 1h, and 4h. The LBank V2 `time` parameter is
@@ -161,9 +163,20 @@ class LBankMarketDataClient:
         forming (its close is provisional); callers needing closed candles must
         drop it when `candle.timestamp + interval_seconds > now`.
 
+        ``on_invalid="raise"`` (default) fails closed on any structurally invalid
+        row (non-numeric fields, inconsistent OHLC, ...). ``on_invalid="skip"``
+        omits such rows instead; this exists for research/backfill where one
+        vendor glitch must not destroy a long series, and must never be used to
+        silently tolerate bad data in any execution path. The skipped rows are
+        observable via the ``last_skipped_rows`` instance attribute (reset on
+        every call), and series continuity is relaxed only up to that many
+        missing candles; larger unexplained gaps still fail closed.
+
         This is strictly public, read-only market data; no API key or trading
         permission is used.
         """
+        if on_invalid not in ("raise", "skip"):
+            raise ValueError("on_invalid must be 'raise' or 'skip'")
         symbol = symbol.strip().lower()
         if not _SYMBOL_RE.fullmatch(symbol):
             raise ValueError("symbol must use LBank pair format, e.g. btc_usdt")
@@ -184,7 +197,17 @@ class LBankMarketDataClient:
         if not rows:
             raise MarketDataValidationError("LBank returned no candle data")
 
-        candles = [self._parse_row(row) for row in rows]
+        candles: list[Candle] = []
+        self.last_skipped_rows = 0
+        for row in rows:
+            try:
+                candles.append(self._parse_row(row))
+            except MarketDataValidationError:
+                if on_invalid == "raise":
+                    raise
+                self.last_skipped_rows += 1
+        if not candles:
+            raise MarketDataValidationError("LBank returned no usable candle data")
         candles.sort(key=lambda candle: candle.timestamp)
         timestamps = [candle.timestamp for candle in candles]
         if len(timestamps) != len(set(timestamps)):
@@ -193,7 +216,17 @@ class LBankMarketDataClient:
             raise MarketDataValidationError("LBank returned a candle timestamp in the future")
         if any(timestamp % interval_seconds != 0 for timestamp in timestamps):
             raise MarketDataValidationError(f"LBank returned a candle not aligned to the {interval} interval")
-        if any(later - earlier != interval_seconds for earlier, later in zip(timestamps, timestamps[1:])):
+        if on_invalid == "skip":
+            # A skipped invalid row creates a discontinuity by design; tolerate
+            # gaps only up to the number of skipped rows so unrelated vendor
+            # gaps still fail closed.
+            missing = sum(max((later - earlier) // interval_seconds - 1, 0)
+                          for earlier, later in zip(timestamps, timestamps[1:]))
+            if missing > self.last_skipped_rows:
+                raise MarketDataValidationError(
+                    f"LBank returned a gap in the {interval} candle series")
+        elif any(later - earlier != interval_seconds
+                 for earlier, later in zip(timestamps, timestamps[1:])):
             raise MarketDataValidationError(f"LBank returned a gap in the {interval} candle series")
         if now - candles[-1].timestamp > interval_seconds * 3:
             raise MarketDataValidationError(f"LBank latest {interval} candle is stale")
