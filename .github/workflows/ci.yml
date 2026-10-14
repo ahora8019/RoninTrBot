@@ -1,0 +1,60 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'feat/**']
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  python-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: Install pinned dependencies (lockfile)
+        run: |
+          pip install -r requirements-lock.txt
+          pip install -e . --no-deps
+      - name: pytest (incl. Python↔JS parity via Node)
+        run: python -m pytest
+
+  worker-static-checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: worker.js + analysis.js parse check
+        run: |
+          node --check workers/ronin-panel/worker.js
+          node --check workers/ronin-panel/analysis.js
+      - name: wrangler config JSON validity
+        run: |
+          python3 - << 'PYEOF'
+          import json, re
+          text = open("workers/ronin-panel/wrangler.jsonc").read()
+          text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+          text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+          data = json.loads(text)
+          assert data["main"] == "worker.js" and data["name"] == "ronin-panel"
+          assert not any("token" in str(b).lower() or "secret" in str(b).lower() for b in data.get("vars", {})), "no secrets in wrangler vars"
+          print("wrangler.jsonc OK:", data["name"])
+          PYEOF
+      - name: secret-pattern scan (tracked files)
+        run: |
+          ! grep -rEn "(github_pat_[A-Za-z0-9]|cfut_[A-Za-z0-9]|[0-9]{9,10}:AA[A-Za-z0-9_-]{33})" \
+            --exclude-dir=.git . && echo "no secret patterns found"
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    continue-on-error: true   # informational while triaged; gates are in deploy-worker.yml
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+      - name: pip-audit against the lockfile
+        run: |
+          pip install pip-audit
+          pip-audit -r requirements-lock.txt --strict

@@ -1,0 +1,21 @@
+/**
+ * RoninTrBot Telegram control-panel worker.
+ * Deployed via .github/workflows/deploy-worker.yml (Wrangler in CI);
+ * manual API uploads are superseded. Secrets are NEVER in this file.
+ * KV: USERS_KV holds broadcast audience state (see docs/security/secrets-and-access.md).
+ */
+{
+  "name": "ronin-panel",
+  "main": "worker.js",
+  "compatibility_date": "2026-09-14",
+  "workers_dev": true,
+  "preview_urls": false,
+  "kv_namespaces": [
+    { "binding": "USERS_KV", "id": "66e90b78f4cd4198bc3ae519af4a33a4" }
+  ],
+  "vars": {
+    // OWNER_TELEGRAM_ID / ADMIN_TELEGRAM_IDS are injected by CI from
+    // environment-specific sources (see deploy workflow); never committed.
+  },
+  "observability": { "enabled": true }
+}
