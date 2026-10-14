@@ -230,3 +230,55 @@ def test_empty_candle_response_is_rejected():
     client, _ = client_with({"result": "true", "error_code": 0, "data": []})
     with pytest.raises(MarketDataValidationError, match="no candle"):
         client.fetch_ohlcv("btc_usdt", "15m")
+
+
+def test_retries_are_exhausted_with_bounded_backoff():
+    calls = []
+
+    def transport(url, params, timeout):
+        calls.append(1)
+        raise MarketDataHTTPError(503)
+
+    sleeps = []
+    client = LBankMarketDataClient(
+        transport=transport, clock=lambda: NOW, min_request_interval_seconds=0,
+        max_retries=2, sleep=sleeps.append)
+
+    with pytest.raises(MarketDataHTTPError):
+        client.fetch_ohlcv("btc_usdt", "15m", 1)
+
+    assert len(calls) == 3  # initial attempt + 2 retries
+    assert sleeps == [0.25, 0.5]  # 0.25 * 2**attempt, capped at 2.0
+    assert all(s <= 2.0 for s in sleeps)
+
+
+def test_generic_market_data_error_is_retried_then_succeeds():
+    calls = []
+    payload = {"result": "true", "error_code": 0, "data": [row()]}
+
+    def transport(url, params, timeout):
+        calls.append(1)
+        if len(calls) == 1:
+            raise MarketDataError("connection reset")
+        return payload
+
+    client = LBankMarketDataClient(
+        transport=transport, clock=lambda: NOW, min_request_interval_seconds=0,
+        max_retries=1, sleep=lambda _: None)
+
+    assert len(client.fetch_ohlcv("btc_usdt", "15m", 1)) == 1
+    assert len(calls) == 2
+
+
+def test_minimum_request_interval_is_respected_between_calls():
+    ticks = iter([0.0, 0.0, 0.1, 0.25])
+    sleeps = []
+    client = LBankMarketDataClient(
+        transport=lambda url, params, timeout: {"result": "true", "error_code": 0, "data": [row()]},
+        clock=lambda: NOW, min_request_interval_seconds=0.25, max_retries=0,
+        sleep=sleeps.append, monotonic=lambda: next(ticks))
+
+    client.fetch_ohlcv("btc_usdt", "15m", 1)
+    client.fetch_ohlcv("btc_usdt", "15m", 1)
+
+    assert sleeps == [0.25 - 0.1]
