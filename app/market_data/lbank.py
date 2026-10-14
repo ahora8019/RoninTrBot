@@ -19,6 +19,9 @@ from urllib.request import Request, urlopen
 
 
 BASE_URL = "https://api.lbank.info"
+MAX_RESPONSE_BYTES = 4 * 1024 * 1024
+MAX_LIMIT = 1999  # LBank returns at most 2000 rows; one slot is reserved for a
+                  # window-boundary candle so `size` never silently truncates.
 INTERVALS: dict[str, tuple[str, int]] = {
     "15m": ("minute15", 15 * 60),
     "1h": ("hour1", 60 * 60),
@@ -67,7 +70,10 @@ def _default_transport(url: str, params: Mapping[str, str], timeout: float) -> A
     request = Request(request_url, headers={"Accept": "application/json", "User-Agent": "RoninTrBot/1.0"})
     try:
         with urlopen(request, timeout=timeout) as response:
-            return json.loads(response.read().decode("utf-8"))
+            body = response.read(MAX_RESPONSE_BYTES + 1)
+            if len(body) > MAX_RESPONSE_BYTES:
+                raise MarketDataError("LBank response exceeded the maximum allowed size")
+            return json.loads(body.decode("utf-8"))
     except HTTPError as exc:
         detail = ""
         try:
@@ -145,26 +151,34 @@ class LBankMarketDataClient:
         raise MarketDataError("LBank request exhausted retries")
 
     def fetch_ohlcv(self, symbol: str, interval: str, limit: int = 200) -> list[Candle]:
-        """Fetch latest candles, ordered oldest-to-newest and validated.
+        """Fetch up to `limit` latest candles, ordered oldest-to-newest and validated.
 
-        Supported intervals are 15m, 1h, and 4h. This is strictly public,
-        read-only market data; no API key or trading permission is used.
+        Supported intervals are 15m, 1h, and 4h. The LBank V2 `time` parameter is
+        a *start* timestamp: the endpoint returns rows from the candle containing
+        `time` forward, capped at `size` rows counting from the start. The fetch
+        window therefore starts `limit * interval` seconds back; the response is
+        trimmed to the most recent `limit` rows. The final candle may still be
+        forming (its close is provisional); callers needing closed candles must
+        drop it when `candle.timestamp + interval_seconds > now`.
+
+        This is strictly public, read-only market data; no API key or trading
+        permission is used.
         """
         symbol = symbol.strip().lower()
         if not _SYMBOL_RE.fullmatch(symbol):
             raise ValueError("symbol must use LBank pair format, e.g. btc_usdt")
         if interval not in INTERVALS:
             raise ValueError(f"Unsupported interval {interval!r}; use one of {tuple(INTERVALS)}")
-        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 2000:
-            raise ValueError("limit must be an integer between 1 and 2000")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_LIMIT:
+            raise ValueError(f"limit must be an integer between 1 and {MAX_LIMIT}")
 
         now = int(self._clock())
         api_interval, interval_seconds = INTERVALS[interval]
         payload = self._request({
             "symbol": symbol,
             "type": api_interval,
-            "size": str(limit),
-            "time": str(now),
+            "size": str(limit + 1),
+            "time": str(now - limit * interval_seconds),
         })
         rows = self._extract_rows(payload)
         if not rows:
@@ -177,9 +191,13 @@ class LBankMarketDataClient:
             raise MarketDataValidationError("LBank returned duplicate candle timestamps")
         if any(timestamp > now + interval_seconds for timestamp in timestamps):
             raise MarketDataValidationError("LBank returned a candle timestamp in the future")
+        if any(timestamp % interval_seconds != 0 for timestamp in timestamps):
+            raise MarketDataValidationError(f"LBank returned a candle not aligned to the {interval} interval")
+        if any(later - earlier != interval_seconds for earlier, later in zip(timestamps, timestamps[1:])):
+            raise MarketDataValidationError(f"LBank returned a gap in the {interval} candle series")
         if now - candles[-1].timestamp > interval_seconds * 3:
             raise MarketDataValidationError(f"LBank latest {interval} candle is stale")
-        return candles
+        return candles[-limit:]
 
     @staticmethod
     def _extract_rows(payload: Any) -> list[Any]:
