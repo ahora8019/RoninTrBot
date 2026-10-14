@@ -27,7 +27,6 @@ def test_long_breakout_with_exact_geometry():
     assert intent is not None
     assert intent.direction == "long"
     assert intent.signal_timestamp == 21
-    assert atr(candles, 14) == Decimal("2")
     transition_tr = (Decimal("2.5") + Decimal("2") * 13) / 14  # break candle TR 2.5
     assert transition_tr == atr(candles, 14)  # exact: 2.035714285714285714285714286
     assert intent.stop_distance == transition_tr * 2
