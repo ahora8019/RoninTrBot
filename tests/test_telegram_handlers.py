@@ -142,3 +142,52 @@ def test_invalid_market_data_request_does_not_call_exchange():
 
     assert "temporarily unavailable" in query.edit_message_text.await_args.args[0]
     assert "No trading action was taken" in query.edit_message_text.await_args.args[0]
+
+
+def test_market_command_rejects_more_than_two_args():
+    reply = []
+    update = SimpleNamespace(
+        effective_message=SimpleNamespace(reply_text=AsyncMock(side_effect=lambda text: reply.append(text))),
+        effective_user=SimpleNamespace(id=999),
+    )
+    from app.telegram.handlers import market_command
+    context = SimpleNamespace(args=["btc_usdt", "15m", "extra"])
+
+    asyncio.run(market_command(update, context))
+
+    assert reply and reply[0].startswith("Usage: /market")
+
+
+def test_market_command_reports_invalid_symbol_without_exchange_call():
+    reply = []
+    update = SimpleNamespace(
+        effective_message=SimpleNamespace(reply_text=AsyncMock(side_effect=lambda text: reply.append(text))),
+        effective_user=SimpleNamespace(id=999),
+    )
+    calls = []
+
+    def fake_fetch(symbol, interval, limit):
+        calls.append(symbol)
+        from app.market_data.lbank import _SYMBOL_RE
+        if not _SYMBOL_RE.fullmatch(symbol.strip().lower()):
+            raise ValueError("symbol must use LBank pair format")
+
+    from app.telegram.handlers import market_command
+    context = SimpleNamespace(
+        args=["bad-symbol-$$$"],
+        application=SimpleNamespace(bot_data={"market_data_client": SimpleNamespace(fetch_ohlcv=fake_fetch)}),
+    )
+
+    asyncio.run(market_command(update, context))
+
+    assert len(calls) == 1  # validated inside the adapter boundary
+    assert reply and reply[0].startswith("Invalid market request:")
+
+
+def test_member_keyboard_hides_admin_actions_while_admin_keyboard_shows_them():
+    from app.telegram.handlers import _keyboard
+    member_buttons = {b.callback_data for row in _keyboard("MEMBER").inline_keyboard for b in row}
+    admin_buttons = {b.callback_data for row in _keyboard("ADMIN").inline_keyboard for b in row}
+
+    assert "settings" not in member_buttons and "management" not in member_buttons
+    assert "settings" in admin_buttons and "management" in admin_buttons
