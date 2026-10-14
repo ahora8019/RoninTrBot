@@ -282,3 +282,41 @@ def test_minimum_request_interval_is_respected_between_calls():
     client.fetch_ohlcv("btc_usdt", "15m", 1)
 
     assert sleeps == [0.25 - 0.1]
+
+
+def test_invalid_row_fails_closed_by_default():
+    bad = row(low="106")  # low > min(open, close)
+    client, _ = client_with([row(NOW - 2700), bad, row(NOW - 900)])
+    with pytest.raises(MarketDataValidationError):
+        client.fetch_ohlcv("btc_usdt", "15m", limit=3)
+
+
+def test_on_invalid_skip_omits_bad_rows_and_counts_them():
+    bad = row(ts=NOW - 1800, low="106")
+    client, _ = client_with([row(NOW - 2700), bad, row(NOW - 900)])
+    candles = client.fetch_ohlcv("btc_usdt", "15m", limit=3, on_invalid="skip")
+    assert [c.timestamp for c in candles] == [NOW - 2700, NOW - 900]
+    assert client.last_skipped_rows == 1
+
+
+def test_on_invalid_skip_raises_when_every_row_is_bad():
+    client, _ = client_with([row(low="106")])
+    with pytest.raises(MarketDataValidationError, match="no usable"):
+        client.fetch_ohlcv("btc_usdt", "15m", limit=1, on_invalid="skip")
+
+
+def test_on_invalid_rejects_unknown_mode():
+    client, _ = client_with([row()])
+    with pytest.raises(ValueError, match="on_invalid"):
+        client.fetch_ohlcv("btc_usdt", "15m", limit=1, on_invalid="ignore")
+
+
+def test_skip_mode_still_rejects_unexplained_gaps():
+    # One bad row at a different position PLUS a real vendor gap (extra 1800s
+    # jump beyond the skipped position) -> gap error must still fire.
+    rows = [row(NOW - 4500), row(NOW - 3600), row(ts=NOW - 2700, low="106"),
+            row(NOW - 1800), row(NOW - 900)]
+    rows = [rows[0], rows[1], rows[2], rows[3], rows[4]]
+    client, _ = client_with([rows[0], rows[2], rows[4]])  # skips -> 2-slot gap; 1 skip -> reject
+    with pytest.raises(MarketDataValidationError, match="gap"):
+        client.fetch_ohlcv("btc_usdt", "15m", limit=3, on_invalid="skip")
