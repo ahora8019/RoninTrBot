@@ -31,7 +31,7 @@ def test_evaluate_combo_returns_expected_metrics_shape_and_is_deterministic():
     r1 = evaluate_combo(candles, **kwargs)
     r2 = evaluate_combo(candles, **kwargs)
     assert r1 == r2
-    assert set(r1) == {"symbol", "interval", "threshold", "windows", "trades",
+    assert set(r1) == {"symbol", "interval", "strategy", "threshold", "windows", "trades",
                        "wins", "losses", "initial_equity", "final_equity",
                        "net_pnl", "total_fees", "max_drawdown_fraction"}
     assert r1["windows"] == 5
@@ -73,3 +73,26 @@ def test_load_or_fetch_uses_cache_without_transport(tmp_path, monkeypatch):
     client = LBankMarketDataClient(transport=forbidden_transport)
     candles, skipped = load_or_fetch(client, "btc_usdt", "1h", 10, cache_dir)
     assert candles == () and skipped == 3
+
+
+def test_evaluate_combo_supports_breakout_strategy_branch():
+    # Sharp break sequence: strong sawtooth breakouts on top of a range base.
+    candles = list(rising(n=420, start=100.0, step=0.05))
+    for i in range(420, 620):
+        close = Decimal("122") + Decimal(str((i % 40) // 10))
+        candles.append(Candle(i, close - Decimal("0.3"), close + Decimal("0.6"),
+                              close - Decimal("0.3"), close, Decimal("40")))
+    result = evaluate_combo(tuple(candles), symbol="test_usdt", interval="1h",
+                            threshold=0, train=200, test=50,
+                            fee=Decimal("0"), slippage=Decimal("0"),
+                            strategy="breakout")
+    assert result["strategy"] == "breakout"
+    assert result["threshold"] is None
+    assert result["windows"] == 8
+
+
+def test_evaluate_combo_rejects_unknown_strategy():
+    with pytest.raises(ValueError, match="unknown strategy"):
+        evaluate_combo(rising(n=350), symbol="test_usdt", interval="1h",
+                       threshold=70, train=200, test=100,
+                       fee=Decimal("0"), slippage=Decimal("0"), strategy="moon")

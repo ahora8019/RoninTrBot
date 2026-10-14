@@ -24,6 +24,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from app.market_data.lbank import INTERVALS, LBankMarketDataClient  # noqa: E402
 from app.risk.engine import RiskLimits  # noqa: E402
+from app.strategy.breakout import BreakoutPolicy, breakout_intent  # noqa: E402
 from app.strategy.indicators import Candle as StrategyCandle  # noqa: E402
 from app.strategy.policy import TrendPolicy, trend_intent  # noqa: E402
 from app.validation.backtest import BacktestConfig  # noqa: E402
@@ -32,6 +33,7 @@ from app.validation.walkforward import evaluate_walk_forward_steps  # noqa: E402
 DEFAULT_SYMBOLS = ("btc_usdt", "eth_usdt")
 DEFAULT_INTERVALS = ("1h", "4h")
 DEFAULT_THRESHOLDS = (60, 70, 80)
+DEFAULT_STRATEGIES = ("trend",)
 
 
 def load_or_fetch(client: LBankMarketDataClient, symbol: str, interval: str,
@@ -60,19 +62,26 @@ def load_or_fetch(client: LBankMarketDataClient, symbol: str, interval: str,
 
 
 def evaluate_combo(candles: tuple, *, symbol: str, interval: str, threshold: int,
-                   train: int, test: int, fee: Decimal, slippage: Decimal) -> dict:
+                   train: int, test: int, fee: Decimal, slippage: Decimal,
+                   strategy: str = "trend") -> dict:
     config = BacktestConfig(fee_rate=fee, slippage_rate=slippage)
-    policy = TrendPolicy(timeframe=interval, symbol=symbol,
-                         limits=RiskLimits(max_notional_fraction=Decimal("0.95")),
-                         threshold=threshold)
+    limits = RiskLimits(max_notional_fraction=Decimal("0.95"))
 
     def factory(history, timestamp):
-        return trend_intent(history, equity=config.initial_equity, policy=policy)
+        if strategy == "trend":
+            policy = TrendPolicy(timeframe=interval, symbol=symbol,
+                                 limits=limits, threshold=threshold)
+            return trend_intent(history, equity=config.initial_equity, policy=policy)
+        if strategy == "breakout":
+            policy = BreakoutPolicy(symbol=symbol, limits=limits)
+            return breakout_intent(history, equity=config.initial_equity, policy=policy)
+        raise ValueError(f"unknown strategy {strategy!r}")
 
     report = evaluate_walk_forward_steps(
         candles, factory=factory, train_size=train, test_size=test, config=config)
     return {
-        "symbol": symbol, "interval": interval, "threshold": threshold,
+        "symbol": symbol, "interval": interval, "strategy": strategy,
+        "threshold": threshold if strategy == "trend" else None,
         "windows": len(report.windows), "trades": report.total_trades,
         "wins": report.win_count, "losses": report.loss_count,
         "initial_equity": str(config.initial_equity),
@@ -88,6 +97,8 @@ def main() -> int:
     parser.add_argument("--symbols", default=",".join(DEFAULT_SYMBOLS))
     parser.add_argument("--intervals", default=",".join(DEFAULT_INTERVALS))
     parser.add_argument("--thresholds", default=",".join(str(t) for t in DEFAULT_THRESHOLDS))
+    parser.add_argument("--strategies", default=",".join(DEFAULT_STRATEGIES),
+                        help="comma list; 'thresholds' apply to trend only")
     parser.add_argument("--limit", type=int, default=1200)
     parser.add_argument("--train", type=int, default=400)
     parser.add_argument("--test", type=int, default=100)
@@ -100,6 +111,10 @@ def main() -> int:
     symbols = [s.strip().lower() for s in args.symbols.split(",") if s.strip()]
     intervals = [s.strip() for s in args.intervals.split(",") if s.strip()]
     thresholds = [int(s) for s in args.thresholds.split(",") if s.strip()]
+    strategies = [s.strip().lower() for s in args.strategies.split(",") if s.strip()]
+    for name in strategies:
+        if name not in ("trend", "breakout"):
+            parser.error(f"unknown strategy {name!r}; supported: trend, breakout")
     fee, slippage = Decimal(args.fee), Decimal(args.slippage)
 
     client = LBankMarketDataClient()
@@ -116,14 +131,17 @@ def main() -> int:
             data_info[key] = {"candles": len(candles), "invalid_skipped": skipped,
                               "first_ts": candles[0].timestamp,
                               "last_ts": candles[-1].timestamp}
-            for threshold in thresholds:
-                try:
-                    results.append(evaluate_combo(
-                        candles, symbol=symbol, interval=interval,
-                        threshold=threshold, train=args.train, test=args.test,
-                        fee=fee, slippage=slippage))
-                except ValueError as exc:
-                    errors.append({"combo": f"{key}/t{threshold}", "error": str(exc)})
+            for strategy in strategies:
+                combo_thresholds = thresholds if strategy == "trend" else (0,)
+                for threshold in combo_thresholds:
+                    label = f"{key}/{strategy}" + (f"t{threshold}" if strategy == "trend" else "")
+                    try:
+                        results.append(evaluate_combo(
+                            candles, symbol=symbol, interval=interval,
+                            threshold=threshold, train=args.train, test=args.test,
+                            fee=fee, slippage=slippage, strategy=strategy))
+                    except ValueError as exc:
+                        errors.append({"combo": label, "error": str(exc)})
 
     ranked = sorted(results, key=lambda r: Decimal(r["net_pnl"]), reverse=True)
     output = {
