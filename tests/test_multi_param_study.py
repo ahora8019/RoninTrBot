@@ -31,9 +31,10 @@ def test_evaluate_combo_returns_expected_metrics_shape_and_is_deterministic():
     r1 = evaluate_combo(candles, **kwargs)
     r2 = evaluate_combo(candles, **kwargs)
     assert r1 == r2
-    assert set(r1) == {"symbol", "interval", "threshold", "windows", "trades",
-                       "wins", "losses", "initial_equity", "final_equity",
+    assert set(r1) == {"symbol", "interval", "strategy", "threshold", "windows",
+                       "trades", "wins", "losses", "initial_equity", "final_equity",
                        "net_pnl", "total_fees", "max_drawdown_fraction"}
+    assert r1["strategy"] == "trend"
     assert r1["windows"] == 5
     assert r1["trades"] == r1["wins"] + r1["losses"] or r1["trades"] >= r1["wins"] + r1["losses"]
     assert Decimal(r1["net_pnl"]) == Decimal(r1["final_equity"]) - Decimal(r1["initial_equity"])
