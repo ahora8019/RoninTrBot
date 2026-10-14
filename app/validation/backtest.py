@@ -105,6 +105,7 @@ class BacktestResult:
     total_fees: Decimal
     trades: tuple[ClosedTrade, ...]
     notes: tuple[str, ...]
+    equity_marks: tuple[Decimal, ...] = ()
 
 
 def run_backtest(
@@ -138,6 +139,7 @@ def run_backtest(
     max_drawdown = Decimal("0")
     trades: list[ClosedTrade] = []
     total_fees = Decimal("0")
+    equity_marks: list[Decimal] = []
     position: dict[str, object] | None = None
 
     for i, candle in enumerate(data):
@@ -194,6 +196,12 @@ def run_backtest(
                 if peak > 0:
                     max_drawdown = max(max_drawdown, (peak - equity) / peak)
 
+        # The exported mark is the same equity value the drawdown tracker saw:
+        # realized equity after any exit, or the marked value while a position
+        # stays open. The entry block below runs after the mark so a signal
+        # candle never includes the position scheduled at its close.
+        mark = equity
+
         # Track unrealized equity at each completed candle while a position is
         # open. Do not mark a newly scheduled position on the signal candle:
         # its entry is at the next candle's open.
@@ -212,9 +220,12 @@ def run_backtest(
             )
             estimated_exit_fee = mark_exit * qty * config.fee_rate
             marked_equity = equity + unrealized_gross - estimated_exit_fee
+            mark = marked_equity
             peak = max(peak, marked_equity)
             if peak > 0:
                 max_drawdown = max(max_drawdown, (peak - marked_equity) / peak)
+
+        equity_marks.append(mark)
 
         intent = intents.get(candle.timestamp)
         if position is None and intent is not None:
@@ -255,4 +266,5 @@ def run_backtest(
          "Maximum drawdown includes candle-close mark-to-market estimates for open positions.",
          "Short simulations have no margin model; a gap-up exit can push equity below zero.",
          "Results exclude funding, borrow costs, spread variability, and partial fills."),
+        tuple(equity_marks),
     )
