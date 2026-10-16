@@ -42,7 +42,7 @@ def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
         failures.append(f"health payload missing fields: {sorted(missing)}")
     if payload.get("status") != "online":
         failures.append(f"status is {payload.get('status')!r}, expected 'online'")
-    if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", str(payload.get("version", ""))):
+    if not re.fullmatch(r"\d+\.\d+\.\d+", str(payload.get("version", ""))):
         failures.append(f"version {payload.get('version')!r} is not semver")
     if payload.get("webhookAuth") not in ("secret_verified", "not_configured"):
         failures.append(f"webhookAuth {payload.get('webhookAuth')!r} is not a known state")
