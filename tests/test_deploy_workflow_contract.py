@@ -20,8 +20,8 @@ def test_deploy_secret_presence_check_uses_environment_variables() -> None:
 def test_worker_deploy_target_matches_project_account_resources() -> None:
     workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
     config_text = Path("workers/ronin-panel/wrangler.jsonc").read_text(encoding="utf-8")
-    config_text = re.sub(r"/\*.*?\*/", "", config_text, flags=re.S)
-    config_text = re.sub(r"^\s*//.*$", "", config_text, flags=re.M)
+text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
     config = json.loads(config_text)
 
     assert config["name"] == "ronintrbot"
