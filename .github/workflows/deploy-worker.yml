@@ -27,6 +27,7 @@ jobs:
           echo "ready=yes" >> "$GITHUB_OUTPUT"
 
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: secrets-present
     runs-on: ubuntu-latest
     steps:
