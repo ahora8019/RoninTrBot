@@ -35,8 +35,8 @@ jobs:
           python3 - << 'PYEOF'
           import json, re
           text = open("workers/ronin-panel/wrangler.jsonc").read()
-text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+          text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
+          text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
           data = json.loads(text)
           assert data["main"] == "worker.js" and data["name"] == "ronintrbot"
           assert not any("token" in str(b).lower() or "secret" in str(b).lower() for b in data.get("vars", {})), "no secrets in wrangler vars"
