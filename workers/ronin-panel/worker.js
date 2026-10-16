@@ -174,9 +174,9 @@ export default {
           const parts = text.trim().split(/\s+/);
           const args = parts.slice(1);
           if (args.length > 2) {
-            await bot.sendMessage(chatId, "Usage: /market [symbol] [15m|1h|4h]\nExample: /market btc_usdt 15m", backKeyboard());
+            await bot.sendMessage(chatId, "Usage: /market [symbol] [15m|1h|4h]\nExample: /market BTCUSDT 15m", backKeyboard());
           } else {
-            const symbol = args[0] || "btc_usdt";
+            const symbol = args[0] || "BTCUSDT";
             const interval = args[1] || "15m";
             const market = await marketDataPage(symbol, interval);
             if (market.imageBlob || market.chartUrl) {
@@ -986,11 +986,22 @@ function marketTimeframeKeyboard(symbol) {
     [button("↩ Choose asset", "charts"), button("🏠 Dashboard", "home")]
   ]};
 }
+function normalizeMarketSymbol(symbol) {
+  const compact = String(symbol || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\\s_/-]/g, "");
+  const normalized = compact.endsWith("usdt")
+    ? compact.slice(0, -4) + "_usdt"
+    : compact;
+  const supported = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt"];
+  return supported.includes(normalized) ? normalized : null;
+}
+
 async function marketDataPage(symbol = "btc_usdt", interval = "15m") {
   const intervals = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } };
-  const supported = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt"];
-  symbol = String(symbol || "").toLowerCase();
-  if (!supported.includes(symbol)) return { text: "Unsupported asset. Choose one from the Market Data menu." };
+  symbol = normalizeMarketSymbol(symbol);
+  if (!symbol) return { text: "Unsupported asset. Choose BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, BNBUSDT, or DOGEUSDT." };
   if (!intervals[interval]) return { text: "Unsupported timeframe. Choose 15m, 1h, or 4h." };
   try {
     const now = Math.floor(Date.now() / 1000);
