@@ -20,8 +20,8 @@ def test_deploy_secret_presence_check_uses_environment_variables() -> None:
 def test_worker_deploy_target_matches_project_account_resources() -> None:
     workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
     config_text = Path("workers/ronin-panel/wrangler.jsonc").read_text(encoding="utf-8")
-text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+    config_text = re.sub(r"/\\*.*?\\*/", "", config_text, flags=re.S)
+    config_text = re.sub(r"^\\s*//.*$", "", config_text, flags=re.M)
     config = json.loads(config_text)
 
     assert config["name"] == "ronintrbot"
@@ -34,3 +34,9 @@ def test_backup_docs_do_not_trigger_worker_deployment() -> None:
     workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
     assert 'branches: [main]' in workflow
     assert 'paths: ["workers/**", ".github/workflows/deploy-worker.yml"]' in workflow
+
+
+def test_market_data_accepts_compact_and_underscored_symbols() -> None:
+    worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
+    assert 'normalizeMarketSymbol(symbol)' in worker
+    assert '["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt"]' in worker
