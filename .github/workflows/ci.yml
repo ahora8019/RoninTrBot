@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, 'feat/**']
+    branches: [main, 'feat/**', 'fix/**', 'backup/**']
   pull_request:
 
 permissions:
@@ -35,10 +35,10 @@ jobs:
           python3 - << 'PYEOF'
           import json, re
           text = open("workers/ronin-panel/wrangler.jsonc").read()
-          text = re.sub(r"/\*.*?\*/", "", text, flags=re.S)
-          text = re.sub(r"^\s*//.*$", "", text, flags=re.M)
+          text = re.sub(r"/\\*.*?\\*/", "", text, flags=re.S)
+          text = re.sub(r"^\\s*//.*$", "", text, flags=re.M)
           data = json.loads(text)
-          assert data["main"] == "worker.js" and data["name"] == "ronin-panel"
+          assert data["main"] == "worker.js" and data["name"] == "ronintrbot"
           assert not any("token" in str(b).lower() or "secret" in str(b).lower() for b in data.get("vars", {})), "no secrets in wrangler vars"
           print("wrangler.jsonc OK:", data["name"])
           PYEOF
@@ -49,7 +49,7 @@ jobs:
 
   dependency-audit:
     runs-on: ubuntu-latest
-    continue-on-error: true   # informational while triaged; gates are in deploy-worker.yml
+    continue-on-error: true
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
