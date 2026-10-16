@@ -6,6 +6,8 @@ def test_worker_deploy_preserves_dashboard_managed_role_variables() -> None:
 
     assert 'CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}' in workflow
     assert 'CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}' in workflow
+    assert 'paths: ["workers/**"]' in workflow
+    assert 'paths: ["workers/**", ".github/workflows/deploy-worker.yml"]' not in workflow
     assert "--keep-vars" in workflow, (
         "Worker deploy must preserve dashboard-managed OWNER_TELEGRAM_ID and "
         "ADMIN_TELEGRAM_IDS variables; wrangler.jsonc intentionally does not "
