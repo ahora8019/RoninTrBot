@@ -25,13 +25,13 @@ def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
         with urllib.request.urlopen(request, timeout=timeout) as resp:
             if resp.status != 200:
                 return [f"health GET returned {resp.status}, expected 200"]
-            payload = json.loads(resp.read().decode())
+            payload = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             return ["health GET returned 403 — check Cloudflare edge bot-protection rules"]
         return [f"health GET failed: {exc}"]
-    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError) as exc:
-        return [f"health GET failed: {exc}"]
+    except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
+        return [f"health GET failed: {type(exc).__name__}: {exc}"]
 
     if not isinstance(payload, dict):
         return ["health response must be a JSON object"]
