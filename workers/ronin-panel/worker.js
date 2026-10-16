@@ -990,7 +990,7 @@ function normalizeMarketSymbol(symbol) {
   const compact = String(symbol || "")
     .trim()
     .toLowerCase()
-    .replace(/[\\s_/-]/g, "");
+    .replace(/[\s_/-]/g, "");
   const normalized = compact.endsWith("usdt")
     ? compact.slice(0, -4) + "_usdt"
     : compact;
