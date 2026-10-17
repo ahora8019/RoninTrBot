@@ -29,7 +29,7 @@ def valid_payload():
         "status": "online",
         "engine": "idle",
         "paperTrading": True,
-        "webhookAuth": "not_configured",
+        "webhookAuth": "secret_verified",
     }
 
 
@@ -63,3 +63,22 @@ def test_smoke_reports_network_error(monkeypatch):
     failures = smoke_test.smoke("https://example.invalid")
     assert len(failures) == 1
     assert "URLError" in failures[0]
+
+
+
+@pytest.mark.parametrize("auth_state", ["not_configured", None, "unknown"])
+def test_smoke_fails_closed_when_webhook_auth_is_not_verified(monkeypatch, auth_state):
+    payload = valid_payload()
+    payload["webhookAuth"] = auth_state
+    body = json.dumps(payload).encode()
+    monkeypatch.setattr(smoke_test.urllib.request, "urlopen", lambda *a, **k: FakeResponse(body))
+    failures = smoke_test.smoke("https://example.invalid")
+    assert any("expected 'secret_verified'" in failure for failure in failures)
+
+
+def test_smoke_rejects_non_online_health_state(monkeypatch):
+    payload = valid_payload()
+    payload["status"] = "offline"
+    body = json.dumps(payload).encode()
+    monkeypatch.setattr(smoke_test.urllib.request, "urlopen", lambda *a, **k: FakeResponse(body))
+    assert any("expected 'online'" in failure for failure in smoke_test.smoke("https://example.invalid"))
