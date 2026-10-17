@@ -30,7 +30,7 @@ export default {
           engine: "offline",
           exchange: "disconnected",
           paperTrading: "ready",
-          webhookAuth: env.WEBHOOK_SECRET ? "secret_verified" : "not_configured",
+          webhookAuth: env.WEBHOOK_SECRET ? "configured" : "not_configured",
           broadcast: env.USERS_KV ? "ready" : "kv_missing"
         });
       }
