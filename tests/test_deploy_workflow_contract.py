@@ -40,3 +40,9 @@ def test_market_data_accepts_compact_and_underscored_symbols() -> None:
     worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
     assert "normalizeMarketSymbol(symbol)" in worker
     assert '["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt"]' in worker
+
+def test_worker_rejects_telegram_updates_without_webhook_secret() -> None:
+    worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
+    assert 'if (!env.WEBHOOK_SECRET)' in worker
+    assert 'return json({ error: "Webhook secret not configured" }, 503)' in worker
+    assert 'return json({ error: "Forbidden" }, 403)' in worker
