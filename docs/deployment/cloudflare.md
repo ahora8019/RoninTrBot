@@ -20,4 +20,4 @@ at https://ronintrbot.ahora-project.workers.dev. Preview URLs remain disabled.
 No paid resource should be enabled without explicit approval. Live order placement remains out of scope; trading stays read-only/paper-only.
 
 ## Smoke test
-The smoke test uses an explicit user agent to reduce false positives from Cloudflare edge bot protection. HTTP errors, network failures, malformed JSON, invalid health payloads, offline status, or an unverified webhook secret fail the smoke test.
+The smoke test uses an explicit user agent to reduce false positives from Cloudflare edge bot protection. It performs a read-only GET health check, then sends an empty synthetic POST without the Telegram secret header and requires HTTP 403. It never calls Telegram or triggers trading. HTTP errors, network failures, malformed JSON, invalid health payloads, offline status, missing webhook configuration, or a POST that is not forbidden fail the test.
