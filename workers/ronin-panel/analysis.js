@@ -18,6 +18,12 @@ export const MIN_TIMEFRAME_CANDLES = 51;
 const REGIMES = ["trend", "range", "high_volatility"];
 
 function num(v, field) {
+  // Match Python Decimal(str(value)): reject missing/boolean/blank values
+  // instead of silently coercing them to 0 or 1 via JavaScript Number().
+  if (v === null || v === undefined || typeof v === "boolean" ||
+      (typeof v === "string" && v.trim() === "")) {
+    throw new TypeError(`${field} must be a finite number`);
+  }
   const n = Number(v);
   if (!Number.isFinite(n)) throw new TypeError(`${field} must be a finite number`);
   return n;
