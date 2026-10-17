@@ -1,19 +1,23 @@
-# Cloudflare Deployment (ronin-panel)
+# Cloudflare Deployment (RoninTrBot)
 
-Environments: **local** (repo), **CI** (tests/static), **production** = the single live worker `ronin-panel` on `ronintrb.workers.dev`. Staging/preview is intentionally NOT created (see deployment-architecture.md: single small worker, previews disabled; a preview policy lands only when the service grows).
+The repository deployment target is the Project Cloudflare account's Worker
+at https://ronintrbot.ahora-project.workers.dev. Preview URLs remain disabled.
 
-## Deploy path (as of CI wiring)
-1. CI (`ci.yml`) must be green: python tests (incl. parity), worker static checks, secret-pattern scan.
-2. `deploy-worker.yml` (manual or push-to-main touching `workers/**`) — gated on `CLOUDFLARE_API_TOKEN` + `CLOUDFLARE_ACCOUNT_ID` secrets; **fails loudly when missing, never fakes**.
-3. Commit SHA of the deployment is echoed in the run (traceability manual → automatic).
-4. `scripts/smoke_test.py` verifies the live health payload (version semver, required fields, webhook-auth state).
+## Deploy path
+1. CI (ci.yml) must pass Python tests including Python-JavaScript parity, worker syntax/config checks, and secret-pattern scan.
+2. deploy-worker.yml runs manually or after a push to main that changes workers/** or the deployment workflow.
+3. Deployment requires GitHub Actions secrets CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID. Missing credentials block deployment.
+4. Wrangler deploys with --keep-vars to preserve dashboard-managed role variables.
+5. The post-deploy smoke test checks the health payload and fails on invalid responses.
 
-## What lives in the cloud (never in repo)
-Worker secrets (`TELEGRAM_BOT_TOKEN`, `WEBHOOK_SECRET`), vars (`OWNER_TELEGRAM_ID`, `ADMIN_TELEGRAM_IDS`), KV binding `USERS_KV` → namespace `66e90b78…`.
+## Cloud resources
+- KV binding USERS_KV: namespace ID 97fdd4c0960e4b60bedee671172b52b7.
+- Worker secrets TELEGRAM_BOT_TOKEN and WEBHOOK_SECRET must be configured directly in Cloudflare. WEBHOOK_SECRET is mandatory: Telegram's webhook must be registered with the matching secret_token. The deployment smoke test fails unless health reports webhookAuth=secret_verified. Never commit secrets or paste them into chat.
+- Dashboard variables OWNER_TELEGRAM_ID and ADMIN_TELEGRAM_IDS are environment-specific.
+- This configuration alone does not prove Telegram or exchange connectivity.
 
-## Costs
-Workers Free tier is sufficient at current traffic (public-data fetches on demand only). No paid resource may be enabled without explicit owner approval (rule 13).
+## Safety
+No paid resource should be enabled without explicit approval. Live order placement remains out of scope; trading stays read-only/paper-only.
 
-## Known edge behavior (verified 2026-10-14)
-
-Cloudflare's edge bot-protection blocks default `Python-urllib/x.y` user agents with HTTP 403 on `workers.dev` health GETs; explicit descriptive UAs pass. `scripts/smoke_test.py` sends `RoninTrBot-SmokeTest/1.0` for this reason and reports a 403 with diagnosis hint instead of a bare failure.
+## Smoke test
+The smoke test uses an explicit user agent to reduce false positives from Cloudflare edge bot protection. It performs a read-only GET health check, then sends an empty synthetic POST without the Telegram secret header and requires HTTP 403. It never calls Telegram or triggers trading. HTTP errors, network failures, malformed JSON, invalid health payloads, offline status, missing webhook configuration, or a POST that is not forbidden fail the test.

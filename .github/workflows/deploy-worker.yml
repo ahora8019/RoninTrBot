@@ -4,13 +4,14 @@ on:
   workflow_dispatch:
   push:
     branches: [main]
-    paths: ["workers/**"]
+    paths: ["workers/**", ".github/workflows/deploy-worker.yml"]
 
 permissions:
   contents: read
 
 jobs:
   secrets-present:
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs: { ready: ${{ steps.check.outputs.ready }} }
     steps:
@@ -27,6 +28,7 @@ jobs:
           echo "ready=yes" >> "$GITHUB_OUTPUT"
 
   deploy:
+    if: github.ref == 'refs/heads/main'
     needs: secrets-present
     runs-on: ubuntu-latest
     steps:
@@ -43,7 +45,7 @@ jobs:
       - name: Post-deploy health verification (smoke)
         run: |
           pip install -r requirements-lock.txt
-          python scripts/smoke_test.py --base-url https://ronin-panel.ronintrb.workers.dev
+          python scripts/smoke_test.py --base-url https://ronintrbot.ahora-project.workers.dev
 
   rollback-note:
     if: failure()

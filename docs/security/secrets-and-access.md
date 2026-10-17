@@ -14,6 +14,7 @@
 
 ## Access rules
 - Least privilege everywhere; edge secrets never leave the edge; service secrets never reach the edge.
+- `WEBHOOK_SECRET` is mandatory for POST updates. Configure it as a Cloudflare Worker secret and register Telegram's webhook with the same `secret_token`; without it the Worker returns `503`, and a mismatched header returns `403`.
 - Preview/CI never sees production values; a MISSING required secret must fail the pipeline loudly (never fake).
 - Rotation: if any value is suspected exposed → revoke first (BotFather `/revoke`; Cloudflare token page), then set fresh value, re-run smoke test, record in audit log.
 - Telegram user IDs are personal data: never commit them; the worker's owner ID stays a cloud-side var.

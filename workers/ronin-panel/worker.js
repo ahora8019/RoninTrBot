@@ -30,7 +30,7 @@ export default {
           engine: "offline",
           exchange: "disconnected",
           paperTrading: "ready",
-          webhookAuth: env.WEBHOOK_SECRET ? "secret_verified" : "not_configured",
+          webhookAuth: env.WEBHOOK_SECRET ? "configured" : "not_configured",
           broadcast: env.USERS_KV ? "ready" : "kv_missing"
         });
       }
@@ -39,22 +39,19 @@ export default {
         return json({ error: "Method Not Allowed" }, 405);
       }
 
-      if (!env.TELEGRAM_BOT_TOKEN) {
-        return json({
-          error: "Missing TELEGRAM_BOT_TOKEN"
-        }, 500);
+      // Authenticate before checking other configuration so unauthenticated
+      // probes never learn whether the Telegram bot token is configured.
+      // Register Telegram's webhook with secret_token=<WEBHOOK_SECRET>.
+      if (!env.WEBHOOK_SECRET) {
+        return json({ error: "Webhook secret not configured" }, 503);
+      }
+      const header = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
+      if (header !== env.WEBHOOK_SECRET) {
+        return json({ error: "Forbidden" }, 403);
       }
 
-      // Webhook authentication: once WEBHOOK_SECRET is configured and the
-      // Telegram webhook is (re)registered with secret_token=<WEBHOOK_SECRET>,
-      // every update must carry the matching X-Telegram-Bot-Api-Secret-Token
-      // header. Without it, forged POSTs could impersonate any user id
-      // (including the owner) and trigger admin actions such as broadcast.
-      if (env.WEBHOOK_SECRET) {
-        const header = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
-        if (header !== env.WEBHOOK_SECRET) {
-          return json({ error: "Forbidden" }, 403);
-        }
+      if (!env.TELEGRAM_BOT_TOKEN) {
+        return json({ error: "Missing TELEGRAM_BOT_TOKEN" }, 500);
       }
 
       const contentLength = Number(request.headers.get("content-length") || "0");
@@ -174,9 +171,9 @@ export default {
           const parts = text.trim().split(/\s+/);
           const args = parts.slice(1);
           if (args.length > 2) {
-            await bot.sendMessage(chatId, "Usage: /market [symbol] [15m|1h|4h]\nExample: /market btc_usdt 15m", backKeyboard());
+            await bot.sendMessage(chatId, "Usage: /market [symbol] [15m|1h|4h]\nExample: /market BTCUSDT 15m", backKeyboard());
           } else {
-            const symbol = args[0] || "btc_usdt";
+            const symbol = args[0] || "BTCUSDT";
             const interval = args[1] || "15m";
             const market = await marketDataPage(symbol, interval);
             if (market.imageBlob || market.chartUrl) {
@@ -986,11 +983,22 @@ function marketTimeframeKeyboard(symbol) {
     [button("↩ Choose asset", "charts"), button("🏠 Dashboard", "home")]
   ]};
 }
+function normalizeMarketSymbol(symbol) {
+  const compact = String(symbol || "")
+    .trim()
+    .toLowerCase()
+    .replace(/[\s_/-]/g, "");
+  const normalized = compact.endsWith("usdt")
+    ? compact.slice(0, -4) + "_usdt"
+    : compact;
+  const supported = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt"];
+  return supported.includes(normalized) ? normalized : null;
+}
+
 async function marketDataPage(symbol = "btc_usdt", interval = "15m") {
   const intervals = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } };
-  const supported = ["btc_usdt", "eth_usdt", "sol_usdt", "xrp_usdt", "bnb_usdt", "doge_usdt"];
-  symbol = String(symbol || "").toLowerCase();
-  if (!supported.includes(symbol)) return { text: "Unsupported asset. Choose one from the Market Data menu." };
+  symbol = normalizeMarketSymbol(symbol);
+  if (!symbol) return { text: "Unsupported asset. Choose BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, BNBUSDT, or DOGEUSDT." };
   if (!intervals[interval]) return { text: "Unsupported timeframe. Choose 15m, 1h, or 4h." };
   try {
     const now = Math.floor(Date.now() / 1000);
