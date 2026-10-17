@@ -46,3 +46,9 @@ def test_worker_rejects_telegram_updates_without_webhook_secret() -> None:
     assert 'if (!env.WEBHOOK_SECRET)' in worker
     assert 'return json({ error: "Webhook secret not configured" }, 503)' in worker
     assert 'return json({ error: "Forbidden" }, 403)' in worker
+
+
+def test_deploy_secret_gate_only_runs_on_main() -> None:
+    workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
+    assert "secrets-present:\n    if: github.ref == 'refs/heads/main'" in workflow
+    assert "deploy:\n    if: github.ref == 'refs/heads/main'" in workflow
