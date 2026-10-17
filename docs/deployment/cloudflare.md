@@ -12,7 +12,7 @@ at https://ronintrbot.ahora-project.workers.dev. Preview URLs remain disabled.
 
 ## Cloud resources
 - KV binding USERS_KV: namespace ID 97fdd4c0960e4b60bedee671172b52b7.
-- Worker secret TELEGRAM_BOT_TOKEN and optional WEBHOOK_SECRET must be configured directly in Cloudflare. Never commit secrets or paste them into chat.
+- Worker secrets TELEGRAM_BOT_TOKEN and WEBHOOK_SECRET must be configured directly in Cloudflare. WEBHOOK_SECRET is mandatory: Telegram's webhook must be registered with the matching secret_token. The deployment smoke test fails unless health reports webhookAuth=secret_verified. Never commit secrets or paste them into chat.
 - Dashboard variables OWNER_TELEGRAM_ID and ADMIN_TELEGRAM_IDS are environment-specific.
 - This configuration alone does not prove Telegram or exchange connectivity.
 
@@ -20,4 +20,4 @@ at https://ronintrbot.ahora-project.workers.dev. Preview URLs remain disabled.
 No paid resource should be enabled without explicit approval. Live order placement remains out of scope; trading stays read-only/paper-only.
 
 ## Smoke test
-The smoke test uses an explicit user agent to reduce false positives from Cloudflare edge bot protection. HTTP errors, network failures, malformed JSON, and invalid health payloads fail the smoke test.
+The smoke test uses an explicit user agent to reduce false positives from Cloudflare edge bot protection. HTTP errors, network failures, malformed JSON, invalid health payloads, offline status, or an unverified webhook secret fail the smoke test.
