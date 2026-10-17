@@ -91,3 +91,21 @@ def test_worker_port_rejects_structural_defects_like_python():
                             input=json.dumps({"candles": candles}), capture_output=True,
                             text=True, timeout=30)
     assert result.returncode != 0, "JS port must fail closed on invalid OHLC"
+
+@pytest.mark.skipif(NODE is None, reason="Node.js is required for the parity harness")
+@pytest.mark.parametrize(("field", "bad_value"), [
+    ("open", None),
+    ("high", ""),
+    ("low", True),
+    ("close", False),
+    ("volume", "   "),
+])
+def test_worker_port_rejects_values_javascript_would_coerce(field, bad_value):
+    """Do not let null/blank/boolean candle values silently become 0 or 1."""
+    candles = [{"timestamp": i, "open": 100, "high": 101, "low": 99,
+                "close": 100, "volume": 1} for i in range(60)]
+    candles[30][field] = bad_value
+    result = subprocess.run([NODE, str(WORKER_LIB), "--selftest"],
+                            input=json.dumps({"candles": candles}), capture_output=True,
+                            text=True, timeout=30)
+    assert result.returncode != 0, f"JS port must reject invalid {field}={bad_value!r}"
