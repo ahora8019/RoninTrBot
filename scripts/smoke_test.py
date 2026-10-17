@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """RoninTrBot post-deployment smoke test (worker edge).
 
-Verifies the health endpoint shape, version format, and webhook-auth state.
+Verifies health, semantic version, and mandatory Telegram webhook authentication.
 Read-only: no Telegram calls and no trading actions.
 """
 from __future__ import annotations
@@ -42,10 +42,14 @@ def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
         failures.append(f"health payload missing fields: {sorted(missing)}")
     if payload.get("status") != "online":
         failures.append(f"status is {payload.get('status')!r}, expected 'online'")
-    if not re.fullmatch(r"\d+\.\d+\.\d+", str(payload.get("version", ""))):
+    if not re.fullmatch(r"\\d+\\.\\d+\\.\\d+", str(payload.get("version", ""))):
         failures.append(f"version {payload.get('version')!r} is not semver")
-    if payload.get("webhookAuth") not in ("secret_verified", "not_configured"):
-        failures.append(f"webhookAuth {payload.get('webhookAuth')!r} is not a known state")
+    # A healthy HTTP response is not sufficient: fail promotion if the webhook
+    # is not configured to reject forged Telegram updates.
+    if payload.get("webhookAuth") != "secret_verified":
+        failures.append(
+            f"webhookAuth is {payload.get('webhookAuth')!r}; expected 'secret_verified'"
+        )
     return failures
 
 
