@@ -39,25 +39,19 @@ export default {
         return json({ error: "Method Not Allowed" }, 405);
       }
 
-      if (!env.TELEGRAM_BOT_TOKEN) {
-        return json({
-          error: "Missing TELEGRAM_BOT_TOKEN"
-        }, 500);
-      }
-
-      // Webhook authentication: once WEBHOOK_SECRET is configured and the
-      // Telegram webhook is (re)registered with secret_token=<WEBHOOK_SECRET>,
-      // every update must carry the matching X-Telegram-Bot-Api-Secret-Token
-      // header. Without it, forged POSTs could impersonate any user id
-      // (including the owner) and trigger admin actions such as broadcast.
+      // Authenticate before checking other configuration so unauthenticated
+      // probes never learn whether the Telegram bot token is configured.
+      // Register Telegram's webhook with secret_token=<WEBHOOK_SECRET>.
       if (!env.WEBHOOK_SECRET) {
-        // Fail closed: Telegram updates must never be accepted without a
-        // configured webhook secret, or caller-supplied user IDs can be forged.
         return json({ error: "Webhook secret not configured" }, 503);
       }
       const header = request.headers.get("X-Telegram-Bot-Api-Secret-Token") || "";
       if (header !== env.WEBHOOK_SECRET) {
         return json({ error: "Forbidden" }, 403);
+      }
+
+      if (!env.TELEGRAM_BOT_TOKEN) {
+        return json({ error: "Missing TELEGRAM_BOT_TOKEN" }, 500);
       }
 
       const contentLength = Number(request.headers.get("content-length") || "0");
