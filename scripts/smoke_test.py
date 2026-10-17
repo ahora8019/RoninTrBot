@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""RoninTrBot post-deployment smoke test (worker edge).
+"""Read-only post-deployment smoke test for RoninTrBot's Worker edge.
 
-Verifies health, semantic version, and mandatory Telegram webhook authentication.
-Read-only: no Telegram calls and no trading actions.
+Checks health and proves that an unauthenticated synthetic POST is rejected.
+It does not call Telegram or perform trading actions.
 """
 from __future__ import annotations
 
@@ -29,7 +29,7 @@ def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
     except urllib.error.HTTPError as exc:
         if exc.code == 403:
             return ["health GET returned 403 — check Cloudflare edge bot-protection rules"]
-        return [f"health GET failed: {exc}"]
+        return [f"health GET failed: HTTP {exc.code}"]
     except (urllib.error.URLError, TimeoutError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         return [f"health GET failed: {type(exc).__name__}: {exc}"]
 
@@ -44,11 +44,33 @@ def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
         failures.append(f"status is {payload.get('status')!r}, expected 'online'")
     if not re.fullmatch(r"\d+\.\d+\.\d+", str(payload.get("version", ""))):
         failures.append(f"version {payload.get('version')!r} is not semver")
-    # A healthy HTTP response is not sufficient: fail promotion if the webhook
-    # is not configured to reject forged Telegram updates.
-    if payload.get("webhookAuth") != "secret_verified":
+    if payload.get("webhookAuth") != "configured":
         failures.append(
-            f"webhookAuth is {payload.get('webhookAuth')!r}; expected 'secret_verified'"
+            f"webhookAuth is {payload.get('webhookAuth')!r}; expected 'configured'"
+        )
+    if failures:
+        return failures
+
+    # A health flag alone cannot prove that the Worker enforces the secret.
+    # Send an empty synthetic update without the Telegram secret header and
+    # require HTTP 403. The Worker must reject it before parsing/processing it.
+    probe = urllib.request.Request(
+        base + "/",
+        data=b"{}",
+        headers={"User-Agent": USER_AGENT, "Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(probe, timeout=timeout) as resp:
+            status = resp.status
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+    except (urllib.error.URLError, TimeoutError) as exc:
+        return [f"webhook auth probe failed: {type(exc).__name__}: {exc}"]
+
+    if status != 403:
+        failures.append(
+            f"unauthenticated webhook POST returned HTTP {status}; expected 403"
         )
     return failures
 
