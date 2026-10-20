@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import time
 from pathlib import Path
 from typing import Any
 
@@ -42,7 +43,7 @@ class SQLiteIdempotencyStore:
         with self._connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute(
-                "SELECT fingerprint, state, result_json FROM paper_idempotency WHERE idempotency_key = ?",
+                "SELECT fingerprint, state, result_json, updated_at FROM paper_idempotency WHERE idempotency_key = ?",
                 (key,),
             ).fetchone()
             if row is None:
@@ -51,11 +52,22 @@ class SQLiteIdempotencyStore:
                     (key, fingerprint),
                 )
                 return "new", None
-            old_fingerprint, state, result_json = row
+            old_fingerprint, state, result_json, updated_at = row
             if old_fingerprint != fingerprint:
                 return "conflict", None
             if state == "in_progress":
+                # Paper replays are bounded to at most 200 candles. Reclaim a
+                # reservation abandoned for an hour after a crash/restart.
+                if updated_at < int(time.time()) - 3600:
+                    connection.execute(
+                        "UPDATE paper_idempotency SET updated_at = unixepoch() "
+                        "WHERE idempotency_key = ? AND state = 'in_progress'",
+                        (key,),
+                    )
+                    return "new", None
                 return "in_progress", None
+            if result_json is None:
+                raise RuntimeError("completed paper idempotency record has no result")
             return "replay", json.loads(result_json)
 
     def release(self, key: str, fingerprint: str) -> None:
