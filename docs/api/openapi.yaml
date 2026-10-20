@@ -52,6 +52,12 @@ paths:
       summary: Paper engine state (equity, open position, decisions tail, halted flag).
       responses:
         "200": { $ref: "#/components/responses/envelope" }
+  /v1/paper/status:
+    get:
+      operationId: getPaperStatus
+      summary: Read-only paper simulation status; never enables live trading.
+      responses:
+        "200": { $ref: "#/components/responses/envelope" }
   /v1/paper/session:
     post:
       operationId: runPaperSession
@@ -69,7 +75,7 @@ paths:
               required: [policy, candles_ref]
               properties:
                 policy: { type: string, enum: ["trend", "breakout"] }
-                candles_ref: { type: string, description: "Server-side dataset handle; raw candle upload is never accepted." }
+                candles_ref: { type: string, pattern: "^lbank:[a-z0-9]+_[a-z0-9]+:(15m|1h|4h):(60|[6-9][0-9]|1[0-9][0-9]|200)$", description: "Public LBank spot replay selector, e.g. lbank:btc_usdt:1h:200; raw candle upload is never accepted." }
       responses:
         "200": { $ref: "#/components/responses/envelope" }
         "403": { $ref: "#/components/responses/error" }
