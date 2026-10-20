@@ -145,9 +145,9 @@ def create_app(
                 request_id,
                 error={
                     "code": "method_not_allowed",
-                    "message": "Only GET is supported by this API slice.",
+                    "message": "Only GET is supported, except POST /v1/paper/session.",
                 },
-                extra_headers=(("Allow", "GET"),),
+                extra_headers=(("Allow", "GET, POST" if path == "/v1/paper/session" else "GET"),),
             )
 
         if path == "/v1/health":
