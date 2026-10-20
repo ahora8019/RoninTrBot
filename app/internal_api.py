@@ -10,6 +10,7 @@ import json
 import os
 import re
 import time
+from decimal import Decimal
 from http import HTTPStatus
 from typing import Any, Callable
 from urllib.parse import parse_qs
@@ -18,6 +19,10 @@ from wsgiref.simple_server import make_server
 
 from app.market_data.lbank import LBankMarketDataClient, MarketDataError
 from app.strategy.indicators import Candle as StrategyCandle, SIGNAL_THRESHOLD, analyze_timeframe
+from app.paper.portfolio import PaperConfig, PaperEngine
+from app.paper.runner import run_paper_session
+from app.risk.engine import RiskLimits
+from app.strategy.policy import TrendPolicy
 
 
 _JSON_HEADERS = [
@@ -63,6 +68,9 @@ def create_app(
     )
     lbank_client = market_data_client or LBankMarketDataClient()
     market_state: dict[str, Any] = {"last_fetch_at": None}
+    paper_state: dict[str, Any] = {"last_session_at": None, "session_count": 0}
+    # Process-local replay protection is intentionally lab-only; production needs durable storage.
+    paper_idempotency: dict[str, tuple[str, dict[str, Any]]] = {}
 
     def respond(
         start_response,
@@ -126,7 +134,7 @@ def create_app(
                 extra_headers=(("WWW-Authenticate", "Bearer"),),
             )
 
-        if method != "GET":
+        if method != "GET" and not (method == "POST" and path == "/v1/paper/session"):
             return respond(
                 start_response,
                 HTTPStatus.METHOD_NOT_ALLOWED,
@@ -166,9 +174,127 @@ def create_app(
                         else "not_connected"
                     ),
                     "last_market_fetch_at": market_state["last_fetch_at"],
-                    "paper_engine_state": "not_started",
+                    "paper_engine_state": ("ready" if paper_state["session_count"] else "not_started"),
+                    "last_paper_session_at": paper_state["last_session_at"],
+                    "paper_session_count": paper_state["session_count"],
                 },
             )
+
+        if path == "/v1/paper/status":
+            return respond(
+                start_response, HTTPStatus.OK, request_id,
+                data={
+                    "mode": "paper",
+                    "live_trading_enabled": False,
+                    "session_state": "ready" if paper_state["session_count"] else "not_started",
+                    "session_count": paper_state["session_count"],
+                    "last_session_at": paper_state["last_session_at"],
+                    "idempotency_storage": "process_local_lab_only",
+                },
+            )
+
+        if path == "/v1/paper/session":
+            if os.environ.get("RONINTRBOT_LAB_MODE", "").strip().lower() != "true":
+                return error_response(
+                    start_response, request_id, HTTPStatus.FORBIDDEN,
+                    "paper_lab_only", "Paper session replay is disabled outside explicit lab mode.",
+                )
+            idempotency_key = environ.get("HTTP_IDEMPOTENCY_KEY", "").strip()
+            if not 8 <= len(idempotency_key) <= 128:
+                return error_response(
+                    start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "idempotency_key_required", "Provide an Idempotency-Key header (8-128 characters).",
+                )
+            try:
+                content_length = int(environ.get("CONTENT_LENGTH") or "0")
+            except ValueError:
+                content_length = -1
+            if content_length < 0 or content_length > 16384:
+                return error_response(
+                    start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_paper_request", "Request body must be valid JSON and no larger than 16 KiB.",
+                )
+            try:
+                raw_body = environ["wsgi.input"].read(content_length)
+                payload = json.loads(raw_body.decode("utf-8"))
+            except (KeyError, UnicodeDecodeError, json.JSONDecodeError):
+                return error_response(
+                    start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_paper_request", "Request body must be valid JSON.",
+                )
+            if not isinstance(payload, dict) or set(payload) != {"policy", "candles_ref"}:
+                return error_response(
+                    start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_paper_request", "Provide exactly policy and candles_ref.",
+                )
+            if payload.get("policy") != "trend":
+                return error_response(
+                    start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "unsupported_paper_policy", "Only the trend policy is available in this paper API slice.",
+                )
+            ref = payload.get("candles_ref")
+            match = re.fullmatch(r"lbank:([a-z0-9]+_[a-z0-9]+):(15m|1h|4h):(60|[6-9][0-9]|1[0-9][0-9]|200)", ref or "")
+            if not match:
+                return error_response(
+                    start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_candles_ref", "candles_ref must be lbank:<symbol>:<interval>:<60-200>.",
+                )
+            request_fingerprint = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+            cached = paper_idempotency.get(idempotency_key)
+            if cached:
+                if cached[0] != request_fingerprint:
+                    return error_response(
+                        start_response, request_id, HTTPStatus.CONFLICT,
+                        "idempotency_conflict", "This Idempotency-Key was already used for a different request.",
+                    )
+                return respond(start_response, HTTPStatus.OK, request_id, data=cached[1])
+            symbol, interval, limit = match.group(1), match.group(2), int(match.group(3))
+            try:
+                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit)
+                candles = tuple(StrategyCandle(
+                    candle.timestamp, candle.open, candle.high, candle.low, candle.close, candle.volume
+                ) for candle in raw_candles)
+                policy = TrendPolicy(
+                    timeframe=interval, market_type="spot", symbol=symbol,
+                    limits=RiskLimits(max_notional_fraction=Decimal("0.95")),
+                )
+                engine = PaperEngine(PaperConfig())
+                report = run_paper_session(candles, policy=policy, engine=engine)
+            except MarketDataError:
+                return error_response(
+                    start_response, request_id, HTTPStatus.BAD_GATEWAY,
+                    "market_data_unavailable", "LBank market data is temporarily unavailable or invalid.",
+                )
+            except ValueError:
+                return error_response(
+                    start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_paper_dataset", "The selected market history is insufficient or invalid.",
+                )
+            paper_state["session_count"] += 1
+            paper_state["last_session_at"] = int(time.time())
+            market_state["last_fetch_at"] = paper_state["last_session_at"]
+            result = {
+                "mode": "paper",
+                "live_trading_enabled": False,
+                "source": "lbank_public_spot",
+                "symbol": symbol,
+                "interval": interval,
+                "candles_processed": report.candles_processed,
+                "initial_equity": str(report.initial_equity),
+                "final_equity": str(report.final_equity),
+                "net_pnl": str(report.net_pnl),
+                "total_fees": str(report.total_fees),
+                "trade_count": report.trade_count,
+                "halted": report.halted,
+                "decisions": [
+                    {"index": d.index, "timestamp": d.candle_timestamp, "action": d.action, "reason": d.reason}
+                    for d in report.decisions[-20:]
+                ],
+                "notes": list(report.notes),
+                "idempotency_storage": "process_local_lab_only",
+            }
+            paper_idempotency[idempotency_key] = (request_fingerprint, result)
+            return respond(start_response, HTTPStatus.OK, request_id, data=result)
 
         if path == "/v1/strategy/analysis":
             query = parse_qs(
