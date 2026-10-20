@@ -26,3 +26,19 @@ def test_idempotency_store_does_not_replay_incomplete_reservation(tmp_path):
     store = SQLiteIdempotencyStore(tmp_path / "paper.sqlite3")
     assert store.get_or_reserve("key-123456", "fingerprint-a") == ("new", None)
     assert store.get_or_reserve("key-123456", "fingerprint-a") == ("in_progress", None)
+
+
+def test_idempotency_store_reclaims_abandoned_reservation_after_lease_timeout(tmp_path):
+    import sqlite3
+
+    path = tmp_path / "paper.sqlite3"
+    store = SQLiteIdempotencyStore(path)
+    assert store.get_or_reserve("key-123456", "fingerprint-a") == ("new", None)
+    with sqlite3.connect(path) as connection:
+        connection.execute(
+            "UPDATE paper_idempotency SET updated_at = unixepoch() - 3601 WHERE idempotency_key = ?",
+            ("key-123456",),
+        )
+
+    assert store.get_or_reserve("key-123456", "fingerprint-a") == ("new", None)
+    assert store.get_or_reserve("key-123456", "fingerprint-a") == ("in_progress", None)
