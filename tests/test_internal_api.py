@@ -272,3 +272,103 @@ def test_paper_session_is_lab_only_and_rejects_missing_idempotency_key():
             os.environ.pop("RONINTRBOT_LAB_MODE", None)
         else:
             os.environ["RONINTRBOT_LAB_MODE"] = old
+
+
+def test_paper_session_replays_completed_result_without_refetching_market_data(monkeypatch, tmp_path):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
+    monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+
+    class FakeMarketDataClient:
+        calls = 0
+
+        def fetch_ohlcv(self, symbol, interval, limit):
+            self.calls += 1
+            assert (symbol, interval, limit) == ("btc_usdt", "1h", 60)
+            return [
+                Candle(1_800_000_000 + i * 3600, Decimal(100 + i),
+                       Decimal(102 + i), Decimal(99 + i), Decimal(101 + i), Decimal("10"))
+                for i in range(60)
+            ]
+
+    client = FakeMarketDataClient()
+    app = create_app(secret="test-secret", market_data_client=client)
+    body = {"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:60"}
+    headers = {"HTTP_IDEMPOTENCY_KEY": "paper-key-123"}
+
+    status, _, first = request(app, path="/v1/paper/session", method="POST", body=body, extra_headers=headers)
+    status2, _, replay = request(app, path="/v1/paper/session", method="POST", body=body, extra_headers=headers)
+
+    assert status == status2 == "200 OK"
+    assert first["data"]["idempotency_storage"] == "sqlite_durable_lab_only"
+    assert replay["data"] == first["data"]
+    assert client.calls == 1
+
+
+def test_paper_session_rejects_same_key_with_different_payload(monkeypatch, tmp_path):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
+    monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            return [
+                Candle(1_800_000_000 + i * 3600, Decimal(100 + i),
+                       Decimal(102 + i), Decimal(99 + i), Decimal(101 + i), Decimal("10"))
+                for i in range(60)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    headers = {"HTTP_IDEMPOTENCY_KEY": "paper-key-456"}
+    status, _, _ = request(
+        app, path="/v1/paper/session", method="POST",
+        body={"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:60"}, extra_headers=headers,
+    )
+    conflict, _, payload = request(
+        app, path="/v1/paper/session", method="POST",
+        body={"policy": "trend", "candles_ref": "lbank:btc_usdt:4h:60"}, extra_headers=headers,
+    )
+
+    assert status == "200 OK"
+    assert conflict == "409 Conflict"
+    assert payload["error"]["code"] == "idempotency_conflict"
+
+
+def test_paper_session_releases_reservation_after_unexpected_failure(monkeypatch, tmp_path):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
+    monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+
+    class FlakyMarketDataClient:
+        calls = 0
+
+        def fetch_ohlcv(self, symbol, interval, limit):
+            self.calls += 1
+            if self.calls == 1:
+                raise RuntimeError("private diagnostic detail")
+            return [
+                Candle(1_800_000_000 + i * 3600, Decimal(100 + i),
+                       Decimal(102 + i), Decimal(99 + i), Decimal(101 + i), Decimal("10"))
+                for i in range(60)
+            ]
+
+    client = FlakyMarketDataClient()
+    app = create_app(secret="test-secret", market_data_client=client)
+    headers = {"HTTP_IDEMPOTENCY_KEY": "paper-key-789"}
+    body = {"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:60"}
+
+    failed, _, error = request(app, path="/v1/paper/session", method="POST", body=body, extra_headers=headers)
+    retried, _, result = request(app, path="/v1/paper/session", method="POST", body=body, extra_headers=headers)
+
+    assert failed == "502 Bad Gateway"
+    assert error["error"]["code"] == "paper_session_failed"
+    assert "private diagnostic detail" not in json.dumps(error)
+    assert retried == "200 OK"
+    assert result["data"]["mode"] == "paper"
+    assert client.calls == 2
