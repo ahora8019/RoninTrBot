@@ -17,6 +17,7 @@ from uuid import uuid4
 from wsgiref.simple_server import make_server
 
 from app.market_data.lbank import LBankMarketDataClient, MarketDataError
+from app.strategy.indicators import Candle as StrategyCandle, SIGNAL_THRESHOLD, analyze_timeframe
 
 
 _JSON_HEADERS = [
@@ -166,6 +167,95 @@ def create_app(
                     ),
                     "last_market_fetch_at": market_state["last_fetch_at"],
                     "paper_engine_state": "not_started",
+                },
+            )
+
+        if path == "/v1/strategy/analysis":
+            query = parse_qs(
+                environ.get("QUERY_STRING", ""), keep_blank_values=True
+            )
+            symbols = query.get("symbol", [])
+            intervals = query.get("interval", [])
+            if (
+                len(symbols) != 1
+                or not _MARKET_PATH.fullmatch(f"/v1/market/{symbols[0]}/ohlcv")
+                or len(intervals) != 1
+                or intervals[0] not in _ALLOWED_INTERVALS
+            ):
+                return error_response(
+                    start_response,
+                    request_id,
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_strategy_request",
+                    "Provide one valid symbol and one supported interval (15m, 1h, 4h).",
+                )
+            symbol, interval = symbols[0], intervals[0]
+            try:
+                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, 200)
+            except MarketDataError:
+                return error_response(
+                    start_response,
+                    request_id,
+                    HTTPStatus.BAD_GATEWAY,
+                    "market_data_unavailable",
+                    "LBank market data is temporarily unavailable or invalid.",
+                )
+            except ValueError:
+                return error_response(
+                    start_response,
+                    request_id,
+                    HTTPStatus.UNPROCESSABLE_ENTITY,
+                    "invalid_strategy_request",
+                    "The symbol or interval is invalid.",
+                )
+
+            candles = tuple(
+                StrategyCandle(
+                    candle.timestamp, candle.open, candle.high, candle.low,
+                    candle.close, candle.volume,
+                )
+                for candle in raw_candles
+            )
+            try:
+                analysis = analyze_timeframe(interval, candles)
+            except ValueError as exc:
+                if "not enough candles" in str(exc):
+                    return error_response(
+                        start_response,
+                        request_id,
+                        HTTPStatus.UNPROCESSABLE_ENTITY,
+                        "insufficient_market_history",
+                        "At least 51 valid candles are required for strategy analysis.",
+                    )
+                return error_response(
+                    start_response,
+                    request_id,
+                    HTTPStatus.BAD_GATEWAY,
+                    "market_data_unavailable",
+                    "LBank market data failed strategy validation.",
+                )
+
+            market_state["last_fetch_at"] = int(time.time())
+            return respond(
+                start_response,
+                HTTPStatus.OK,
+                request_id,
+                data={
+                    "source": "lbank",
+                    "market_type": "spot",
+                    "symbol": symbol,
+                    "interval": interval,
+                    "direction": analysis.direction,
+                    "score": analysis.score,
+                    "threshold": SIGNAL_THRESHOLD,
+                    "eligible": analysis.score >= SIGNAL_THRESHOLD,
+                    "close": str(analysis.close),
+                    "sma_fast": str(analysis.sma_fast),
+                    "sma_slow": str(analysis.sma_slow),
+                    "rsi": str(analysis.rsi),
+                    "atr": str(analysis.atr),
+                    "reasons": list(analysis.reasons),
+                    "execution": "none",
                 },
             )
 
