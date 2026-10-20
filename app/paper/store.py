@@ -58,6 +58,14 @@ class SQLiteIdempotencyStore:
                 return "in_progress", None
             return "replay", json.loads(result_json)
 
+    def release(self, key: str, fingerprint: str) -> None:
+        """Release an unfinished reservation after a failed simulation."""
+        with self._connect() as connection:
+            connection.execute(
+                "DELETE FROM paper_idempotency WHERE idempotency_key = ? AND fingerprint = ? AND state = 'in_progress'",
+                (key, fingerprint),
+            )
+
     def complete(self, key: str, fingerprint: str, result: dict[str, Any]) -> None:
         encoded = json.dumps(result, separators=(",", ":"), sort_keys=True)
         with self._connect() as connection:
