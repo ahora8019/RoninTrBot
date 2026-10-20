@@ -6,14 +6,17 @@ from io import BytesIO
 from app.internal_api import create_app
 
 
-def request(app, path="/v1/health", *, query_string="", method="GET", authorization="Bearer test-secret"):
+def request(app, path="/v1/health", *, query_string="", method="GET", authorization="Bearer test-secret", body=None, extra_headers=None):
     captured = {}
 
     def start_response(status, headers):
         captured["status"] = status
         captured["headers"] = dict(headers)
 
+    raw_body = b"" if body is None else json.dumps(body).encode("utf-8")
     environ = {
+        "CONTENT_LENGTH": str(len(raw_body)),
+        "CONTENT_TYPE": "application/json",
         "REQUEST_METHOD": method,
         "PATH_INFO": path,
         "QUERY_STRING": query_string,
@@ -22,7 +25,7 @@ def request(app, path="/v1/health", *, query_string="", method="GET", authorizat
         "SERVER_PROTOCOL": "HTTP/1.1",
         "wsgi.version": (1, 0),
         "wsgi.url_scheme": "http",
-        "wsgi.input": BytesIO(b""),
+        "wsgi.input": BytesIO(raw_body),
         "wsgi.errors": BytesIO(),
         "wsgi.multithread": False,
         "wsgi.multiprocess": False,
@@ -30,6 +33,8 @@ def request(app, path="/v1/health", *, query_string="", method="GET", authorizat
     }
     if authorization is not None:
         environ["HTTP_AUTHORIZATION"] = authorization
+    if extra_headers:
+        environ.update(extra_headers)
     body = b"".join(app(environ, start_response))
     return captured["status"], captured["headers"], json.loads(body)
 
@@ -229,3 +234,41 @@ def test_strategy_analysis_maps_insufficient_history_to_safe_bad_gateway():
     assert status == "502 Bad Gateway"
     assert payload["error"]["code"] == "market_data_unavailable"
     assert "private upstream detail" not in json.dumps(payload)
+
+
+
+def test_paper_status_reports_not_started_until_session_runs():
+    app = create_app(secret="test-secret")
+    status, _, payload = request(app, path="/v1/paper/status")
+
+    assert status == "200 OK"
+    assert payload["data"]["mode"] == "paper"
+    assert payload["data"]["live_trading_enabled"] is False
+    assert payload["data"]["session_state"] == "not_started"
+
+
+def test_paper_session_is_lab_only_and_rejects_missing_idempotency_key():
+    app = create_app(secret="test-secret")
+    status, _, payload = request(
+        app, path="/v1/paper/session", method="POST",
+        body={"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:200"},
+    )
+    assert status == "403 Forbidden"
+    assert payload["error"]["code"] == "paper_lab_only"
+
+    import os
+    old = os.environ.get("RONINTRBOT_LAB_MODE")
+    os.environ["RONINTRBOT_LAB_MODE"] = "true"
+    try:
+        app = create_app(secret="test-secret")
+        status, _, payload = request(
+            app, path="/v1/paper/session", method="POST",
+            body={"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:200"},
+        )
+        assert status == "422 Unprocessable Entity"
+        assert payload["error"]["code"] == "idempotency_key_required"
+    finally:
+        if old is None:
+            os.environ.pop("RONINTRBOT_LAB_MODE", None)
+        else:
+            os.environ["RONINTRBOT_LAB_MODE"] = old
