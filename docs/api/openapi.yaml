@@ -34,6 +34,7 @@ paths:
       responses:
         "200": { $ref: "#/components/responses/envelope" }
         "422": { $ref: "#/components/responses/error" }
+        "502": { $ref: "#/components/responses/error" }
   /v1/strategy/analysis:
     get:
       operationId: getStrategyAnalysis
