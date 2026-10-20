@@ -21,6 +21,7 @@ from app.market_data.lbank import LBankMarketDataClient, MarketDataError
 from app.strategy.indicators import Candle as StrategyCandle, SIGNAL_THRESHOLD, analyze_timeframe
 from app.paper.portfolio import PaperConfig, PaperEngine
 from app.paper.runner import run_paper_session
+from app.paper.store import SQLiteIdempotencyStore
 from app.risk.engine import RiskLimits
 from app.strategy.policy import TrendPolicy
 
@@ -70,7 +71,9 @@ def create_app(
     market_state: dict[str, Any] = {"last_fetch_at": None}
     paper_state: dict[str, Any] = {"last_session_at": None, "session_count": 0}
     # Process-local replay protection is intentionally lab-only; production needs durable storage.
-    paper_idempotency: dict[str, tuple[str, dict[str, Any]]] = {}
+    paper_store = SQLiteIdempotencyStore(
+        os.environ.get("RONINTRBOT_PAPER_DB_PATH", ".data/ronintrbot-paper.sqlite3")
+    )
 
     def respond(
         start_response,
@@ -240,14 +243,19 @@ def create_app(
                     "invalid_candles_ref", "candles_ref must be lbank:<symbol>:<interval>:<60-200>.",
                 )
             request_fingerprint = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-            cached = paper_idempotency.get(idempotency_key)
-            if cached:
-                if cached[0] != request_fingerprint:
-                    return error_response(
-                        start_response, request_id, HTTPStatus.CONFLICT,
-                        "idempotency_conflict", "This Idempotency-Key was already used for a different request.",
-                    )
-                return respond(start_response, HTTPStatus.OK, request_id, data=cached[1])
+            reservation, cached_result = paper_store.get_or_reserve(idempotency_key, request_fingerprint)
+            if reservation == "conflict":
+                return error_response(
+                    start_response, request_id, HTTPStatus.CONFLICT,
+                    "idempotency_conflict", "This Idempotency-Key was already used for a different request.",
+                )
+            if reservation == "replay":
+                return respond(start_response, HTTPStatus.OK, request_id, data=cached_result)
+            if reservation == "in_progress":
+                return error_response(
+                    start_response, request_id, HTTPStatus.CONFLICT,
+                    "paper_session_in_progress", "A request with this Idempotency-Key is already in progress.",
+                )
             symbol, interval, limit = match.group(1), match.group(2), int(match.group(3))
             try:
                 raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit)
@@ -261,11 +269,13 @@ def create_app(
                 engine = PaperEngine(PaperConfig())
                 report = run_paper_session(candles, policy=policy, engine=engine)
             except MarketDataError:
+                paper_store.release(idempotency_key, request_fingerprint)
                 return error_response(
                     start_response, request_id, HTTPStatus.BAD_GATEWAY,
                     "market_data_unavailable", "LBank market data is temporarily unavailable or invalid.",
                 )
             except ValueError:
+                paper_store.release(idempotency_key, request_fingerprint)
                 return error_response(
                     start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
                     "invalid_paper_dataset", "The selected market history is insufficient or invalid.",
@@ -293,7 +303,7 @@ def create_app(
                 "notes": list(report.notes),
                 "idempotency_storage": "process_local_lab_only",
             }
-            paper_idempotency[idempotency_key] = (request_fingerprint, result)
+            paper_store.complete(idempotency_key, request_fingerprint, result)
             return respond(start_response, HTTPStatus.OK, request_id, data=result)
 
         if path == "/v1/strategy/analysis":
