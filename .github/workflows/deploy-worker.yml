@@ -49,7 +49,7 @@ jobs:
       - name: Install smoke-test dependencies from repository root
         run: python -m pip install -r requirements-lock.txt
       - name: Post-deploy health verification (smoke)
-        run: python scripts/smoke_test.py --base-url https://ronintrbot.ahora-project.workers.dev
+        run: python scripts/smoke_test.py --base-url https://ronintrbot.ahora-project.workers.dev --expected-sha "$GITHUB_SHA"
 
   rollback-note:
     if: failure()
