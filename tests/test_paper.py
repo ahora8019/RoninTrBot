@@ -190,3 +190,58 @@ def test_snapshot_schema_version_gating():
     # Malformed version values fail closed.
     with _pytest.raises(ValueError, match="positive integer"):
         PaperEngine.restore(dict(snapshot, schema_version="2"))
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("step_index", True),
+        ("last_timestamp", True),
+        ("halt_reason", []),
+    ],
+)
+def test_restore_rejects_invalid_control_state_types(field, value):
+    snapshot = PaperEngine().snapshot()
+    snapshot[field] = value
+    with pytest.raises(ValueError, match="snapshot"):
+        PaperEngine.restore(snapshot)
+
+
+def test_restore_rejects_invalid_position_direction():
+    engine = PaperEngine()
+    engine.step(candle(1, 100, 101, 99, 100), long_intent(1))
+    engine.step(candle(2, 100, 101, 99, 100))
+    snapshot = engine.snapshot()
+    snapshot["position"]["direction"] = "sideways"
+
+    with pytest.raises(ValueError, match="position direction"):
+        PaperEngine.restore(snapshot)
+
+
+def test_restore_rejects_non_positive_position_quantity():
+    engine = PaperEngine()
+    engine.step(candle(1, 100, 101, 99, 100), long_intent(1))
+    engine.step(candle(2, 100, 101, 99, 100))
+    snapshot = engine.snapshot()
+    snapshot["position"]["quantity"] = "0"
+
+    with pytest.raises(ValueError, match="quantity"):
+        PaperEngine.restore(snapshot)
+
+
+def test_restore_rejects_position_and_pending_entry_together():
+    engine = PaperEngine()
+    engine.step(candle(1, 100, 101, 99, 100), long_intent(1))
+    engine.step(candle(2, 100, 101, 99, 100))
+    snapshot = engine.snapshot()
+    snapshot["pending"] = {
+        "signal_timestamp": 3,
+        "direction": "long",
+        "market_type": "spot",
+        "quantity": "1",
+        "stop_distance": "2",
+        "target_distance": "4",
+    }
+
+    with pytest.raises(ValueError, match="both an open position"):
+        PaperEngine.restore(snapshot)

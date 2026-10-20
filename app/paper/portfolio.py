@@ -359,6 +359,21 @@ class PaperEngine:
             raise ValueError("snapshot schema_version must be a positive integer")
         if version > SNAPSHOT_SCHEMA_VERSION:
             raise ValueError(f"snapshot schema_version {version} is newer than supported {SNAPSHOT_SCHEMA_VERSION}")
+
+        step_index = snapshot.get("step_index")
+        if isinstance(step_index, bool) or not isinstance(step_index, int) or step_index < 0:
+            raise ValueError("snapshot step_index must be a non-negative integer")
+        last_timestamp = snapshot.get("last_timestamp")
+        if last_timestamp is not None and (
+            isinstance(last_timestamp, bool) or not isinstance(last_timestamp, int)
+        ):
+            raise ValueError("snapshot last_timestamp must be an integer or None")
+        halt_reason = snapshot.get("halt_reason")
+        if halt_reason is not None and not isinstance(halt_reason, str):
+            raise ValueError("snapshot halt_reason must be a string or None")
+        if snapshot.get("position") is not None and snapshot.get("pending") is not None:
+            raise ValueError("snapshot cannot contain both an open position and a pending entry")
+
         try:
             config_raw = snapshot["config"]
             engine = cls(PaperConfig(
@@ -374,15 +389,40 @@ class PaperEngine:
             engine._last_timestamp = snapshot["last_timestamp"]
             raw_position = snapshot["position"]
             if raw_position is not None:
+                direction = raw_position["direction"]
+                market_type = raw_position["market_type"]
+                if direction not in {"long", "short"}:
+                    raise ValueError("snapshot position direction must be 'long' or 'short'")
+                if market_type not in {"spot", "futures"}:
+                    raise ValueError("snapshot position market_type must be 'spot' or 'futures'")
+                if direction == "short" and market_type == "spot":
+                    raise ValueError("snapshot cannot restore a spot short position")
+
+                signal_timestamp = raw_position["signal_timestamp"]
+                entry_timestamp = raw_position["entry_timestamp"]
+                for field, value in (("signal_timestamp", signal_timestamp),
+                                     ("entry_timestamp", entry_timestamp)):
+                    if isinstance(value, bool) or not isinstance(value, int):
+                        raise ValueError(f"snapshot position {field} must be an integer")
+                if signal_timestamp > entry_timestamp:
+                    raise ValueError("snapshot position signal_timestamp cannot exceed entry_timestamp")
+                if last_timestamp is not None and entry_timestamp > last_timestamp:
+                    raise ValueError("snapshot position entry_timestamp cannot exceed last_timestamp")
+
+                quantity = _d(raw_position["quantity"], "position.quantity")
+                entry = _d(raw_position["entry"], "position.entry")
+                stop = _d(raw_position["stop"], "position.stop")
+                target = _d(raw_position["target"], "position.target")
+                entry_fee = _d(raw_position["entry_fee"], "position.entry_fee")
+                if quantity <= 0:
+                    raise ValueError("snapshot position quantity must be greater than zero")
+                if min(entry, stop, target) <= 0:
+                    raise ValueError("snapshot position entry, stop, and target must be greater than zero")
+                if entry_fee < 0:
+                    raise ValueError("snapshot position entry_fee cannot be negative")
                 engine._position = PaperPosition(
-                    str(raw_position["direction"]), str(raw_position["market_type"]),
-                    int(raw_position["signal_timestamp"]),
-                    _d(raw_position["quantity"], "quantity"),
-                    _d(raw_position["entry"], "entry"),
-                    _d(raw_position["stop"], "stop"),
-                    _d(raw_position["target"], "target"),
-                    int(raw_position["entry_timestamp"]),
-                    _d(raw_position["entry_fee"], "entry_fee"),
+                    direction, market_type, signal_timestamp, quantity, entry, stop,
+                    target, entry_timestamp, entry_fee,
                 )
             raw_pending = snapshot["pending"]
             if raw_pending is not None:
