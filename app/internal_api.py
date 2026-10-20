@@ -70,7 +70,8 @@ def create_app(
     lbank_client = market_data_client or LBankMarketDataClient()
     market_state: dict[str, Any] = {"last_fetch_at": None}
     paper_state: dict[str, Any] = {"last_session_at": None, "session_count": 0}
-    # Process-local replay protection is intentionally lab-only; production needs durable storage.
+    # Idempotency is stored in SQLite; hosted deployments must mount a persistent volume.
+    # Session counters below intentionally remain process-local.
     paper_store = SQLiteIdempotencyStore(
         os.environ.get("RONINTRBOT_PAPER_DB_PATH", ".data/ronintrbot-paper.sqlite3")
     )
@@ -243,7 +244,13 @@ def create_app(
                     "invalid_candles_ref", "candles_ref must be lbank:<symbol>:<interval>:<60-200>.",
                 )
             request_fingerprint = json.dumps(payload, sort_keys=True, separators=(",", ":"))
-            reservation, cached_result = paper_store.get_or_reserve(idempotency_key, request_fingerprint)
+            try:
+                reservation, cached_result = paper_store.get_or_reserve(idempotency_key, request_fingerprint)
+            except Exception:
+                return error_response(
+                    start_response, request_id, HTTPStatus.SERVICE_UNAVAILABLE,
+                    "paper_storage_unavailable", "Paper idempotency storage is temporarily unavailable.",
+                )
             if reservation == "conflict":
                 return error_response(
                     start_response, request_id, HTTPStatus.CONFLICT,
@@ -280,9 +287,15 @@ def create_app(
                     start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,
                     "invalid_paper_dataset", "The selected market history is insufficient or invalid.",
                 )
-            paper_state["session_count"] += 1
-            paper_state["last_session_at"] = int(time.time())
-            market_state["last_fetch_at"] = paper_state["last_session_at"]
+            except Exception:
+                try:
+                    paper_store.release(idempotency_key, request_fingerprint)
+                except Exception:
+                    pass
+                return error_response(
+                    start_response, request_id, HTTPStatus.BAD_GATEWAY,
+                    "paper_session_failed", "The paper simulation failed unexpectedly; no result was recorded.",
+                )
             result = {
                 "mode": "paper",
                 "live_trading_enabled": False,
@@ -301,9 +314,22 @@ def create_app(
                     for d in report.decisions[-20:]
                 ],
                 "notes": list(report.notes),
-                "idempotency_storage": "process_local_lab_only",
+                "idempotency_storage": "sqlite_durable_lab_only",
             }
-            paper_store.complete(idempotency_key, request_fingerprint, result)
+            try:
+                paper_store.complete(idempotency_key, request_fingerprint, result)
+            except Exception:
+                try:
+                    paper_store.release(idempotency_key, request_fingerprint)
+                except Exception:
+                    pass
+                return error_response(
+                    start_response, request_id, HTTPStatus.SERVICE_UNAVAILABLE,
+                    "paper_storage_unavailable", "Paper result could not be persisted; retry with the same key.",
+                )
+            paper_state["session_count"] += 1
+            paper_state["last_session_at"] = int(time.time())
+            market_state["last_fetch_at"] = paper_state["last_session_at"]
             return respond(start_response, HTTPStatus.OK, request_id, data=result)
 
         if path == "/v1/strategy/analysis":
