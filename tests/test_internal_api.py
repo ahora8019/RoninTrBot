@@ -167,3 +167,65 @@ def test_market_ohlcv_maps_upstream_failure_to_safe_bad_gateway():
     assert status == "502 Bad Gateway"
     assert payload["error"]["code"] == "market_data_unavailable"
     assert "private upstream detail" not in json.dumps(payload)
+
+
+def test_strategy_analysis_endpoint_returns_explainable_lbank_signal():
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            assert (symbol, interval, limit) == ("btc_usdt", "1h", 200)
+            return [
+                Candle(1_800_000_000 + i * 3600,
+                       Decimal(100 + i), Decimal(102 + i), Decimal(99 + i),
+                       Decimal(101 + i), Decimal("10"))
+                for i in range(60)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    status, headers, payload = request(
+        app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt&interval=1h"
+    )
+
+    assert status == "200 OK"
+    assert headers["Cache-Control"] == "no-store"
+    assert payload["ok"] is True
+    assert payload["data"]["source"] == "lbank"
+    assert payload["data"]["symbol"] == "btc_usdt"
+    assert payload["data"]["interval"] == "1h"
+    assert payload["data"]["direction"] == "long"
+    assert payload["data"]["score"] >= 70
+    assert payload["data"]["eligible"] is True
+    assert payload["data"]["reasons"]
+
+
+def test_strategy_analysis_rejects_missing_or_unsupported_interval():
+    app = create_app(secret="test-secret")
+
+    status, _, payload = request(app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt")
+    assert status == "422 Unprocessable Entity"
+    assert payload["error"]["code"] == "invalid_strategy_request"
+
+    status, _, payload = request(
+        app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt&interval=1m"
+    )
+    assert status == "422 Unprocessable Entity"
+    assert payload["error"]["code"] == "invalid_strategy_request"
+
+
+def test_strategy_analysis_maps_insufficient_history_to_safe_bad_gateway():
+    from app.market_data.lbank import MarketDataError
+
+    class BrokenMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            raise MarketDataError("private upstream detail")
+
+    app = create_app(secret="test-secret", market_data_client=BrokenMarketDataClient())
+    status, _, payload = request(
+        app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt&interval=15m"
+    )
+
+    assert status == "502 Bad Gateway"
+    assert payload["error"]["code"] == "market_data_unavailable"
+    assert "private upstream detail" not in json.dumps(payload)
