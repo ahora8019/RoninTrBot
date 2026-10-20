@@ -25,6 +25,7 @@ def valid_payload():
     return {
         "service": "RoninTrBot",
         "version": "2.5.0",
+        "gitSha": "a" * 40,
         "status": "online",
         "engine": "idle",
         "paperTrading": True,

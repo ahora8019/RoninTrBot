@@ -13,7 +13,7 @@ import sys
 import urllib.error
 import urllib.request
 
-REQUIRED_FIELDS = {"service", "version", "status", "engine", "paperTrading", "webhookAuth"}
+REQUIRED_FIELDS = {"service", "version", "gitSha", "status", "engine", "paperTrading", "webhookAuth"}
 USER_AGENT = "RoninTrBot-SmokeTest/1.0 (+python)"
 DEFAULT_BASE_URL = "https://ronintrbot.ahora-project.workers.dev"
 

@@ -26,6 +26,7 @@ export default {
         return json({
           service: BOT_NAME,
           version: VERSION,
+          gitSha: env.GIT_SHA || "unknown",
           status: "online",
           engine: "offline",
           exchange: "disconnected",
