@@ -25,6 +25,7 @@ def valid_payload():
     return {
         "service": "RoninTrBot",
         "version": "2.5.0",
+        "gitSha": "a" * 40,
         "status": "online",
         "engine": "idle",
         "paperTrading": True,
@@ -46,6 +47,37 @@ def mock_health_and_probe(monkeypatch, payload=None, probe_status=403):
 def test_smoke_accepts_valid_health_and_rejected_unauthenticated_probe(monkeypatch):
     mock_health_and_probe(monkeypatch)
     assert smoke_test.smoke("https://example.invalid") == []
+
+
+def test_smoke_accepts_exact_expected_git_sha(monkeypatch):
+    mock_health_and_probe(monkeypatch)
+    assert smoke_test.smoke("https://example.invalid", expected_sha="a" * 40) == []
+
+
+def test_smoke_rejects_mismatched_expected_git_sha(monkeypatch):
+    mock_health_and_probe(monkeypatch)
+    failures = smoke_test.smoke("https://example.invalid", expected_sha="b" * 40)
+    assert any("does not match expected SHA" in failure for failure in failures)
+
+
+@pytest.mark.parametrize("git_sha", ["unknown", "", None, "a" * 39, "g" * 40, "A" * 40])
+def test_smoke_rejects_missing_or_invalid_deployed_git_sha(monkeypatch, git_sha):
+    payload = valid_payload()
+    payload["gitSha"] = git_sha
+    mock_health_and_probe(monkeypatch, payload)
+    failures = smoke_test.smoke("https://example.invalid")
+    assert any("gitSha is missing, unknown" in failure for failure in failures)
+
+
+@pytest.mark.parametrize("expected_sha", ["unknown", "a" * 39, "g" * 40, "A" * 40])
+def test_smoke_rejects_invalid_expected_git_sha_before_network_call(monkeypatch, expected_sha):
+    def unexpected_network_call(*args, **kwargs):
+        pytest.fail("invalid expected SHA must be rejected before making a request")
+
+    monkeypatch.setattr(smoke_test.urllib.request, "urlopen", unexpected_network_call)
+    assert smoke_test.smoke("https://example.invalid", expected_sha=expected_sha) == [
+        "expected Git SHA must be exactly 40 lowercase hexadecimal characters"
+    ]
 
 
 @pytest.mark.parametrize("body, expected", [

@@ -44,12 +44,12 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          npx --yes wrangler@4 deploy --config workers/ronin-panel/wrangler.jsonc --keep-vars
+          npx --yes wrangler@4 deploy --config workers/ronin-panel/wrangler.jsonc --keep-vars --var "GIT_SHA:$GITHUB_SHA"
           echo "Deployed git SHA: $GITHUB_SHA"
       - name: Install smoke-test dependencies from repository root
         run: python -m pip install -r requirements-lock.txt
       - name: Post-deploy health verification (smoke)
-        run: python scripts/smoke_test.py --base-url https://ronintrbot.ahora-project.workers.dev
+        run: python scripts/smoke_test.py --base-url https://ronintrbot.ahora-project.workers.dev --expected-sha "$GITHUB_SHA"
 
   rollback-note:
     if: failure()
