@@ -38,11 +38,14 @@ paths:
   /v1/strategy/analysis:
     get:
       operationId: getStrategyAnalysis
+      summary: Read-only, explainable single-timeframe analysis over public LBank spot candles.
       parameters:
-        - { name: symbol, in: query, required: true, schema: { type: string } }
+        - { name: symbol, in: query, required: true, schema: { type: string, pattern: "^[a-z0-9]+_[a-z0-9]+$" } }
         - { name: interval, in: query, required: true, schema: { type: string, enum: ["15m", "1h", "4h"] } }
       responses:
         "200": { $ref: "#/components/responses/envelope" }
+        "422": { $ref: "#/components/responses/error" }
+        "502": { $ref: "#/components/responses/error" }
   /v1/paper/status:
     get:
       operationId: getPaperStatus
