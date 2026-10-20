@@ -192,7 +192,7 @@ def create_app(
                     "session_state": "ready" if paper_state["session_count"] else "not_started",
                     "session_count": paper_state["session_count"],
                     "last_session_at": paper_state["last_session_at"],
-                    "idempotency_storage": "process_local_lab_only",
+                    "idempotency_storage": "sqlite_durable_lab_only",
                 },
             )
 
