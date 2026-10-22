@@ -8,8 +8,15 @@ permissions:
   contents: read
 
 jobs:
+  deployment-not-requested:
+    if: github.event_name != 'workflow_dispatch' || github.ref != 'refs/heads/main'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Safely skip production deployment
+        run: echo "Production deployment requires workflow_dispatch on main; no deployment was attempted."
+
   secrets-present:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs: { ready: ${{ steps.check.outputs.ready }} }
     steps:
@@ -26,7 +33,7 @@ jobs:
           echo "ready=yes" >> "$GITHUB_OUTPUT"
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     needs: secrets-present
     runs-on: ubuntu-latest
     steps:
