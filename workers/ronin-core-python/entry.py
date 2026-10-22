@@ -1,16 +1,21 @@
 """Cloudflare Python Worker entrypoint for RoninTrBot Core.
 
-Routes not migrated to the async runtime fail closed; they never fall back to a
-second strategy implementation or to a local filesystem database.
+Only public LBank market data is enabled here. Strategy and paper-session routes
+remain fail-closed until their orchestration/runtime tests pass.
 """
 from __future__ import annotations
 
 import hmac
 import json
-from urllib.parse import urlsplit
+import re
+from urllib.parse import parse_qs, urlsplit
 from uuid import uuid4
 
 from workers import Response, WorkerEntrypoint
+
+_MARKET_PATH = re.compile(r"^/v1/market/([a-z0-9]+_[a-z0-9]+)/ohlcv$")
+_ALLOWED_INTERVALS = {"15m", "1h", "4h"}
+_MAX_MARKET_LIMIT = 500
 
 
 def _json_response(status: int, payload: dict, request_id: str) -> Response:
@@ -91,9 +96,73 @@ class Default(WorkerEntrypoint):
                 "ok": True, "request_id": request_id, "data": data, "error": None
             }, request_id)
 
-        # Market, strategy, and session routes remain unavailable until their
-        # async transport and D1 orchestration have passed runtime tests.
-        if path.startswith("/v1/market/") or path in ("/v1/strategy/analysis", "/v1/paper/session"):
+        market_match = _MARKET_PATH.fullmatch(path)
+        if market_match and method == "GET":
+            query = parse_qs(parsed_url.query, keep_blank_values=True)
+            intervals = query.get("interval", [])
+            limits = query.get("limit", ["200"])
+            if (len(intervals) != 1 or intervals[0] not in _ALLOWED_INTERVALS
+                    or len(limits) != 1 or not re.fullmatch(r"[0-9]{1,3}", limits[0])):
+                return _json_response(422, {
+                    "ok": False, "request_id": request_id, "data": None,
+                    "error": {"code": "invalid_market_request",
+                              "message": "Provide one interval (15m, 1h, 4h) and limit (1-500)."}
+                }, request_id)
+            limit = int(limits[0])
+            if not 1 <= limit <= _MAX_MARKET_LIMIT:
+                return _json_response(422, {
+                    "ok": False, "request_id": request_id, "data": None,
+                    "error": {"code": "invalid_market_request",
+                              "message": "limit must be between 1 and 500."}
+                }, request_id)
+            try:
+                from js import fetch
+                from app.market_data.lbank_async import (
+                    AsyncLBankMarketDataClient, AsyncMarketDataError,
+                )
+                client = AsyncLBankMarketDataClient(fetch)
+                candles = await client.fetch_ohlcv(market_match.group(1), intervals[0], limit)
+            except ValueError:
+                return _json_response(422, {
+                    "ok": False, "request_id": request_id, "data": None,
+                    "error": {"code": "invalid_market_request",
+                              "message": "The symbol, interval, or limit is invalid."}
+                }, request_id)
+            except Exception as exc:
+                # Do not expose upstream details or internal runtime data to callers.
+                try:
+                    from app.market_data.lbank_async import AsyncMarketDataError
+                    if not isinstance(exc, AsyncMarketDataError):
+                        pass
+                except Exception:
+                    pass
+                return _json_response(502, {
+                    "ok": False, "request_id": request_id, "data": None,
+                    "error": {"code": "market_data_unavailable",
+                              "message": "LBank market data is temporarily unavailable or invalid."}
+                }, request_id)
+            return _json_response(200, {
+                "ok": True, "request_id": request_id,
+                "data": {
+                    "source": "lbank_public_spot",
+                    "market_type": "spot",
+                    "symbol": market_match.group(1),
+                    "interval": intervals[0],
+                    "count": len(candles),
+                    "candles": [{
+                        "timestamp": candle.timestamp,
+                        "open": str(candle.open), "high": str(candle.high),
+                        "low": str(candle.low), "close": str(candle.close),
+                        "volume": str(candle.volume),
+                    } for candle in candles],
+                    "execution": "none",
+                },
+                "error": None,
+            }, request_id)
+
+        # Strategy and session routes stay unavailable until their orchestration
+        # and D1 idempotency have passed dedicated Cloudflare runtime tests.
+        if path == "/v1/strategy/analysis" or path == "/v1/paper/session":
             return _json_response(503, {
                 "ok": False, "request_id": request_id, "data": None,
                 "error": {"code": "route_not_ready",
