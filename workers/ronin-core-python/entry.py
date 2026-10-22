@@ -38,7 +38,7 @@ class Default(WorkerEntrypoint):
         parsed_url = urlsplit(request.url)
         path = parsed_url.path.rstrip("/") or "/"
         secret = getattr(self.env, "INTERNAL_API_SECRET", "") or ""
-        if not secret:
+        if not secret.strip():
             return _json_response(503, {
                 "ok": False, "request_id": request_id, "data": None,
                 "error": {"code": "service_not_configured",
