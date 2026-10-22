@@ -1,6 +1,11 @@
 from pathlib import Path
+import importlib.util
 import json
 import re
+import sys
+import types
+
+import pytest
 
 
 def test_python_worker_fails_closed_until_routes_are_migrated():
@@ -12,6 +17,25 @@ def test_python_worker_fails_closed_until_routes_are_migrated():
     assert '"route_not_ready"' in source
     assert '"live_trading_enabled": False' in source
     assert "urlsplit(request.url)" in source
+
+
+def test_python_worker_bearer_validation_handles_non_ascii_input(monkeypatch):
+    fake_workers = types.ModuleType("workers")
+    fake_workers.Response = type("Response", (), {})
+    fake_workers.WorkerEntrypoint = type("WorkerEntrypoint", (), {})
+    monkeypatch.setitem(sys.modules, "workers", fake_workers)
+
+    path = Path("workers/ronin-core-python/entry.py")
+    spec = importlib.util.spec_from_file_location("ronin_python_worker_entry_test", path)
+    module = importlib.util.module_from_spec(spec)
+    assert spec.loader is not None
+    spec.loader.exec_module(module)
+
+    assert module._valid_bearer("Bearer correct-secret", "correct-secret") is True
+    assert module._valid_bearer("Bearer wrong-secret", "correct-secret") is False
+    assert module._valid_bearer("Bearer café", "correct-secret") is False
+    assert module._valid_bearer("Basic correct-secret", "correct-secret") is False
+    assert module._valid_bearer("Bearer ", "correct-secret") is False
 
 
 def test_python_worker_config_has_python_runtime_without_unprovisioned_resources():
