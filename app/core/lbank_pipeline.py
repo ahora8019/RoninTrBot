@@ -4,7 +4,7 @@ Public market data only. No account endpoints, credentials, or order placement.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import math
 import time
 from typing import Callable
@@ -110,13 +110,28 @@ def scan_lbank_spot(
         try:
             book = client.get_book_ticker(symbol)
             snapshot = client.to_snapshot(ticker, book)
-            decision = classify_snapshot(snapshot, scanner_policy)
-            if decision.status is not SymbolStatus.SUITABLE:
-                results.append(SpotScanResult(snapshot.symbol, decision, _no_trade_from_decision(decision), 0))
+            # Run liquidity/spread/volatility/age gates before spending a candle request.
+            preliminary = classify_snapshot(replace(snapshot, trend="sideways"), scanner_policy)
+            if preliminary.status is not SymbolStatus.SUITABLE:
+                results.append(SpotScanResult(snapshot.symbol, preliminary, _no_trade_from_decision(preliminary), 0))
                 continue
             candles = fetch_closed_candles(
                 client, symbol, interval=interval, limit=candle_limit, now=now()
             )
+            if len(candles) < 2:
+                decision = SymbolDecision(snapshot.symbol, snapshot.market_type, SymbolStatus.NO_TRADE,
+                                          ("insufficient_closed_candles_for_trend",))
+                results.append(SpotScanResult(snapshot.symbol, decision, _no_trade_from_decision(decision), len(candles)))
+                continue
+            first_close, last_close = candles[0].close, candles[-1].close
+            trend = "up" if last_close > first_close * 1.005 else (
+                "down" if last_close < first_close * 0.995 else "sideways"
+            )
+            snapshot = replace(snapshot, trend=trend)
+            decision = classify_snapshot(snapshot, scanner_policy)
+            if decision.status is not SymbolStatus.SUITABLE:
+                results.append(SpotScanResult(snapshot.symbol, decision, _no_trade_from_decision(decision), len(candles)))
+                continue
             signal = evaluate_closed_candles(candles, strategy_policy)
             results.append(SpotScanResult(snapshot.symbol, decision, signal, len(candles)))
         except (LBankAPIError, ValueError, TimeoutError, OSError) as exc:
