@@ -96,21 +96,67 @@ def test_python_worker_health_response_requires_secret_and_has_no_cache(monkeypa
     assert response.headers["x-content-type-options"] == "nosniff"
 
 
-def test_python_worker_does_not_enable_unmigrated_routes_or_live_trading(monkeypatch):
+def test_python_worker_validates_market_request_and_keeps_strategy_disabled(monkeypatch):
     module = _load_worker_module(monkeypatch)
     worker = module.Default()
     worker.env = types.SimpleNamespace(INTERNAL_API_SECRET="correct-secret")
 
-    market = __import__("asyncio").run(
-        worker.fetch(FakeRequest("/v1/market/BTC_USDT/ohlcv"))
+    invalid_market = __import__("asyncio").run(
+        worker.fetch(FakeRequest("/v1/market/BTC_USDT/ohlcv?interval=1m"))
+    )
+    strategy = __import__("asyncio").run(
+        worker.fetch(FakeRequest("/v1/strategy/analysis"))
     )
     status = __import__("asyncio").run(worker.fetch(FakeRequest("/v1/status")))
 
-    assert market.status == 503
-    assert _decode_response(market)["error"]["code"] == "route_not_ready"
+    assert invalid_market.status == 422
+    assert _decode_response(invalid_market)["error"]["code"] == "invalid_market_request"
+    assert strategy.status == 503
+    assert _decode_response(strategy)["error"]["code"] == "route_not_ready"
     status_payload = _decode_response(status)
     assert status_payload["data"]["live_trading_enabled"] is False
     assert status_payload["data"]["trading_mode"] == "paper"
+
+
+def test_python_worker_returns_public_lbank_candles(monkeypatch):
+    import asyncio
+    import time
+
+    now = int(time.time())
+    last = now // 900 * 900
+    rows = [[last - 1800, "100", "102", "99", "101", "10"],
+            [last - 900, "101", "103", "100", "102", "11"],
+            [last, "102", "104", "101", "103", "12"]]
+
+    class FakeUpstreamResponse:
+        status = 200
+        headers = {"content-length": "100"}
+
+        async def text(self):
+            return json.dumps(rows)
+
+    async def fake_fetch(url, options):
+        assert "symbol=btc_usdt" in url
+        assert "type=minute15" in url
+        return FakeUpstreamResponse()
+
+    monkeypatch.setitem(sys.modules, "js", types.SimpleNamespace(fetch=fake_fetch))
+    module = _load_worker_module(monkeypatch)
+    worker = module.Default()
+    worker.env = types.SimpleNamespace(INTERNAL_API_SECRET="correct-secret")
+
+    response = asyncio.run(worker.fetch(
+        FakeRequest("/v1/market/btc_usdt/ohlcv?interval=15m&limit=3")
+    ))
+    payload = _decode_response(response)
+
+    assert response.status == 200
+    assert payload["ok"] is True
+    assert payload["data"]["source"] == "lbank_public_spot"
+    assert payload["data"]["count"] == 3
+    assert payload["data"]["candles"][-1]["close"] == "103"
+    assert payload["data"]["execution"] == "none"
+    assert response.headers["cache-control"] == "no-store"
 
 
 def test_python_worker_config_has_python_runtime_without_unprovisioned_resources():
