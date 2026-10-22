@@ -2173,7 +2173,8 @@ function roleEmoji(role) {
 
 
 function isPythonCoreConfigured(env) {
-  return Boolean(env?.PYTHON_CORE_URL && env?.INTERNAL_API_SECRET);
+  // If either setting exists, require a complete configuration; never silently bypass a partial setup.
+  return Boolean(env?.PYTHON_CORE_URL || env?.INTERNAL_API_SECRET);
 }
 
 async function requestPythonCore(env, path) {
