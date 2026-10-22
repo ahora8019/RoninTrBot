@@ -1,17 +1,16 @@
 """Cloudflare Python Worker entrypoint for RoninTrBot Core.
 
-Only routes implemented by this runtime adapter are exposed. Unsupported routes
-fail closed rather than falling back to a second strategy implementation.
+Routes not migrated to the async runtime fail closed; they never fall back to a
+second strategy implementation or to a local filesystem database.
 """
 from __future__ import annotations
 
 import hmac
 import json
-import os
-import re
+from urllib.parse import urlsplit
 from uuid import uuid4
 
-from workers import WorkerEntrypoint, Response
+from workers import Response, WorkerEntrypoint
 
 
 def _json_response(status: int, payload: dict, request_id: str) -> Response:
@@ -27,9 +26,9 @@ def _json_response(status: int, payload: dict, request_id: str) -> Response:
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         request_id = str(uuid4())
-        url = request.url
         method = request.method.upper()
-        path = url.split("?", 1)[0].rstrip("/") or "/"
+        parsed_url = urlsplit(request.url)
+        path = parsed_url.path.rstrip("/") or "/"
         secret = getattr(self.env, "INTERNAL_API_SECRET", "") or ""
         if not secret:
             return _json_response(503, {
@@ -55,9 +54,12 @@ class Default(WorkerEntrypoint):
         if path == "/v1/health" and method == "GET":
             return _json_response(200, {
                 "ok": True, "request_id": request_id,
-                "data": {"status": "ok", "version": os.environ.get("RONINTRBOT_VERSION", "0.1.0"),
-                         "commit": os.environ.get("GIT_SHA", "unknown"),
-                         "stale_after_seconds": 60},
+                "data": {
+                    "status": "ok",
+                    "version": getattr(self.env, "RONINTRBOT_VERSION", "0.1.0"),
+                    "commit": getattr(self.env, "GIT_SHA", "unknown"),
+                    "stale_after_seconds": 60,
+                },
                 "error": None
             }, request_id)
 
@@ -73,16 +75,18 @@ class Default(WorkerEntrypoint):
                 "runtime": "cloudflare-python-worker",
             }
             if path == "/v1/paper/status":
-                data = {"mode": "paper", "live_trading_enabled": False,
-                        "session_state": "not_started", "session_count": 0,
-                        "idempotency_storage": "d1_not_enabled"}
+                data = {
+                    "mode": "paper", "live_trading_enabled": False,
+                    "session_state": "not_started", "session_count": 0,
+                    "idempotency_storage": "d1_not_enabled",
+                }
             return _json_response(200, {
                 "ok": True, "request_id": request_id, "data": data, "error": None
             }, request_id)
 
-        # Do not claim the Core is migrated until async market-data, strategy,
-        # and D1-backed paper orchestration are integrated and tested.
-        if path.startswith("/v1/market/") or path == "/v1/strategy/analysis" or path == "/v1/paper/session":
+        # Market, strategy, and session routes remain unavailable until their
+        # async transport and D1 orchestration have passed runtime tests.
+        if path.startswith("/v1/market/") or path in ("/v1/strategy/analysis", "/v1/paper/session"):
             return _json_response(503, {
                 "ok": False, "request_id": request_id, "data": None,
                 "error": {"code": "route_not_ready",
