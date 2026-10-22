@@ -57,6 +57,19 @@ class StrategyPolicy:
     max_stop_atr: float = 3.0
 
 
+def _valid_policy(policy: StrategyPolicy) -> bool:
+    periods = (policy.ema_fast, policy.ema_slow, policy.rsi_period, policy.atr_period, policy.breakout_lookback)
+    thresholds = (policy.volume_multiplier, policy.minimum_reward_risk, policy.max_stop_atr)
+    return (
+        all(isinstance(period, int) and not isinstance(period, bool) and period >= 1 for period in periods)
+        and policy.ema_fast < policy.ema_slow
+        and all(math.isfinite(value) for value in thresholds)
+        and policy.volume_multiplier > 0
+        and policy.minimum_reward_risk > 0
+        and policy.max_stop_atr > 0
+    )
+
+
 def _ema(values: Sequence[float], period: int) -> float:
     if len(values) < period:
         raise ValueError("insufficient_values_for_ema")
@@ -97,6 +110,8 @@ def evaluate_closed_candles(
     policy: StrategyPolicy = StrategyPolicy(),
 ) -> StrategySignal:
     """Evaluate only closed, chronologically ordered candles; long-only v1."""
+    if not _valid_policy(policy):
+        return _no_trade("invalid_strategy_policy")
     required = max(
         policy.ema_slow + 2,
         policy.rsi_period + 1,
