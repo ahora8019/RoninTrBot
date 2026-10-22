@@ -175,7 +175,7 @@ export default {
           } else {
             const symbol = args[0] || "BTCUSDT";
             const interval = args[1] || "15m";
-            const market = await marketDataPage(symbol, interval);
+            const market = await marketDataPage(symbol, interval, env);
             if (market.imageBlob || market.chartUrl) {
               const sent = await bot.sendPhoto(chatId, market.imageBlob || market.chartUrl, market.caption, backKeyboard());
               if (!sent?.ok) await bot.sendMessage(chatId, market.text || "Chart image failed to send.", backKeyboard());
@@ -267,7 +267,7 @@ export default {
         }
         const strategyTf = /^strategy_tf_(btc_usdt|eth_usdt|sol_usdt|xrp_usdt|bnb_usdt|doge_usdt)_(15m|1h|4h)$/.exec(action || "");
         if (strategyTf) {
-          const page = await strategyAnalysisPage(strategyTf[1], strategyTf[2]);
+          const page = await strategyAnalysisPage(strategyTf[1], strategyTf[2], env);
           await bot.editMessageText(chatId, messageId, page, strategyAssetKeyboard());
           return json({ ok: true, strategyStep: "analysis", symbol: strategyTf[1] });
         }
@@ -995,7 +995,7 @@ function normalizeMarketSymbol(symbol) {
   return supported.includes(normalized) ? normalized : null;
 }
 
-async function marketDataPage(symbol = "btc_usdt", interval = "15m") {
+async function marketDataPage(symbol = "btc_usdt", interval = "15m", env = {}) {
   const intervals = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } };
   symbol = normalizeMarketSymbol(symbol);
   if (!symbol) return { text: "Unsupported asset. Choose BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, BNBUSDT, or DOGEUSDT." };
@@ -1003,24 +1003,36 @@ async function marketDataPage(symbol = "btc_usdt", interval = "15m") {
   try {
     const now = Math.floor(Date.now() / 1000);
     const size = 100;
-    // LBank interprets `time` as the starting timestamp, not the current time.
-    const startTime = now - intervals[interval].seconds * size;
-    const params = new URLSearchParams({ symbol, type: intervals[interval].type, size: String(size), time: String(startTime) });
-    const response = await fetch("https://api.lbkex.com/v2/kline.do?" + params.toString(), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000) });
-    if (!response.ok) throw new Error("http");
-    const payload = await response.json();
-    if (!Array.isArray(payload) && (String(payload?.error_code ?? "0") !== "0" || !["true", "True", true, undefined].includes(payload?.result))) throw new Error("api");
-    const rows = Array.isArray(payload) ? payload : payload?.data;
-    if (!Array.isArray(rows) || rows.length < 20) throw new Error("empty");
-    const candles = rows.map(row => {
-      if (!Array.isArray(row) || row.length !== 6) throw new Error("shape");
-      let ts = Number(row[0]); if (ts > 1000000000000) ts = Math.floor(ts / 1000);
-      const values = row.slice(1).map(Number);
-      if (!Number.isFinite(ts) || ts <= 0 || values.some(v => !Number.isFinite(v))) throw new Error("number");
-      const [open, high, low, close, volume] = values;
-      if (Math.min(open, high, low, close) <= 0 || volume < 0 || high < Math.max(open, close, low) || low > Math.min(open, close, high)) throw new Error("ohlc");
-      return { ts, open, high, low, close, volume };
-    }).sort((a,b)=>a.ts-b.ts);
+    let candles;
+    if (isPythonCoreConfigured(env)) {
+      const core = await requestPythonCore(env, "/v1/market/" + encodeURIComponent(symbol) + "/ohlcv?interval=" + encodeURIComponent(interval) + "&limit=" + size);
+      if (core.data?.source !== "lbank" || !Array.isArray(core.data.candles) || core.data.candles.length < 20) throw new Error("python_core_market_data");
+      candles = core.data.candles.map(c => ({
+        ts: Number(c.timestamp), open: Number(c.open), high: Number(c.high),
+        low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
+      }));
+      if (candles.some(c => !Number.isFinite(c.ts) || c.ts <= 0 || [c.open,c.high,c.low,c.close,c.volume].some(v => !Number.isFinite(v)))) throw new Error("python_core_market_data");
+    } else {
+      // Development fallback until PYTHON_CORE_URL and INTERNAL_API_SECRET are configured.
+      // LBank interprets `time` as the starting timestamp, not the current time.
+      const startTime = now - intervals[interval].seconds * size;
+      const params = new URLSearchParams({ symbol, type: intervals[interval].type, size: String(size), time: String(startTime) });
+      const response = await fetch("https://api.lbkex.com/v2/kline.do?" + params.toString(), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000) });
+      if (!response.ok) throw new Error("http");
+      const payload = await response.json();
+      if (!Array.isArray(payload) && (String(payload?.error_code ?? "0") !== "0" || !["true", "True", true, undefined].includes(payload?.result))) throw new Error("api");
+      const rows = Array.isArray(payload) ? payload : payload?.data;
+      if (!Array.isArray(rows) || rows.length < 20) throw new Error("empty");
+      candles = rows.map(row => {
+        if (!Array.isArray(row) || row.length !== 6) throw new Error("shape");
+        let ts = Number(row[0]); if (ts > 1000000000000) ts = Math.floor(ts / 1000);
+        const values = row.slice(1).map(Number);
+        if (!Number.isFinite(ts) || ts <= 0 || values.some(v => !Number.isFinite(v))) throw new Error("number");
+        const [open, high, low, close, volume] = values;
+        if (Math.min(open, high, low, close) <= 0 || volume < 0 || high < Math.max(open, close, low) || low > Math.min(open, close, high)) throw new Error("ohlc");
+        return { ts, open, high, low, close, volume };
+      }).sort((a,b)=>a.ts-b.ts);
+    }
     const latest = candles[candles.length-1];
     if (latest.ts > now + intervals[interval].seconds || now-latest.ts > intervals[interval].seconds*3) throw new Error("stale");
     const stamp = new Date(latest.ts*1000).toISOString().replace("T", " ").slice(0,16) + " UTC";
@@ -1127,8 +1139,23 @@ function strategyTimeframeKeyboard(symbol) {
 
 /* Live strategy analysis, powered by the JS port of the Python core
    (workers/ronin-panel/analysis.js — CI-verified parity with app/strategy). */
-async function strategyAnalysisPage(symbol = "btc_usdt", interval = "1h") {
+async function strategyAnalysisPage(symbol = "btc_usdt", interval = "1h", env = {}) {
   try {
+    if (isPythonCoreConfigured(env)) {
+      const core = await requestPythonCore(env, "/v1/strategy/analysis?symbol=" + encodeURIComponent(symbol) + "&interval=" + encodeURIComponent(interval));
+      const a = core.data;
+      if (a?.source !== "lbank" || a?.execution !== "none") throw new Error("python_core_strategy");
+      const dirEmoji = a.direction === "long" ? "🟢 LONG" : a.direction === "short" ? "🔴 SHORT" : "⚪ NEUTRAL";
+      const fmt = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 8 });
+      return "🧠 RoninTrBot • STRATEGY (Python Core)\n━━━━━━━━━━━━━━━━━━\n\n"
+        + "Asset\n" + String(a.symbol || symbol).toUpperCase().replace("_", "/") + " · " + interval + "\n\n"
+        + "Signal\n" + dirEmoji + "\n\n"
+        + "Score\n" + a.score + " / 100" + (a.eligible ? "  ✅ above threshold " + a.threshold : "  🔒 below threshold " + a.threshold)
+        + "\n\nRSI(14)\n" + fmt(a.rsi) + "\n\nATR(14)\n" + fmt(a.atr)
+        + "\n\n━━━━━━━━━━━━━━━━━━\n"
+        + (Array.isArray(a.reasons) ? a.reasons.map(r => "• " + r).join("\n") : "")
+        + "\n\n🔒 Python Core analysis only · No order placed";
+    }
     const now = Math.floor(Date.now() / 1000);
     const size = 100;
     const meta = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } }[interval];
@@ -2144,6 +2171,34 @@ function roleEmoji(role) {
   return "👤";
 }
 
+
+function isPythonCoreConfigured(env) {
+  // If either setting exists, require a complete configuration; never silently bypass a partial setup.
+  return Boolean(env?.PYTHON_CORE_URL || env?.INTERNAL_API_SECRET);
+}
+
+async function requestPythonCore(env, path) {
+  const rawBase = String(env?.PYTHON_CORE_URL || "").trim();
+  const secret = String(env?.INTERNAL_API_SECRET || "");
+  if (!rawBase || !secret) throw new Error("python_core_not_configured");
+  let base;
+  try { base = new URL(rawBase); } catch { throw new Error("python_core_configuration_invalid"); }
+  if (base.protocol !== "https:" || base.username || base.password || base.search || base.hash) {
+    throw new Error("python_core_configuration_invalid");
+  }
+  const url = base.origin + base.pathname.replace(/\/+$/, "") + path;
+  const response = await fetch(url, {
+    method: "GET",
+    headers: { Accept: "application/json", Authorization: "Bearer " + secret },
+    signal: AbortSignal.timeout(8000),
+  });
+  let payload;
+  try { payload = await response.json(); } catch { throw new Error("python_core_invalid_response"); }
+  if (!response.ok || payload?.ok !== true || !payload?.data || payload?.error) {
+    throw new Error("python_core_request_failed");
+  }
+  return payload;
+}
 
 function json(
   data,
