@@ -1,0 +1,14 @@
+[project]
+name = "ronintrbot-python-core"
+version = "0.1.0"
+description = "Python-first Cloudflare Worker entrypoint for RoninTrBot"
+requires-python = ">=3.13"
+dependencies = [
+  "workers-runtime-sdk",
+]
+
+[dependency-groups]
+dev = [
+  "workers-py",
+]
+
