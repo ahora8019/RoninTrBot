@@ -62,3 +62,42 @@ def test_non_finite_pnl_is_rejected():
 def test_exit_before_entry_is_rejected():
     with pytest.raises(ValueError, match="exit_before_entry"):
         calculate_metrics([trade(1, 10, 9)], starting_balance=100)
+
+def test_metrics_from_paper_trades_only_include_closed_trades():
+    from app.core.paper_trading import PaperTradeStatus
+    from app.core.strategy_lab import metrics_from_paper_trades
+
+    class Record:
+        def __init__(self, status, pnl, entry, exit):
+            self.status = status
+            self.net_pnl = pnl
+            self.entry_time = entry
+            self.exit_time = exit
+
+    result = metrics_from_paper_trades(
+        [
+            Record(PaperTradeStatus.CLOSED_TAKE_PROFIT, 12.5, 1, 2),
+            Record(PaperTradeStatus.CLOSED_STOP_LOSS, -4.5, 2, 3),
+            Record(PaperTradeStatus.OPEN, -1.0, 3, None),
+            Record(PaperTradeStatus.REJECTED, 0.0, 4, None),
+        ],
+        starting_balance=100,
+    )
+    assert result.trades == 2
+    assert result.net_pnl == 8.0
+    assert result.profit_factor == pytest.approx(12.5 / 4.5)
+
+
+def test_metrics_from_paper_trades_reject_closed_record_without_timestamps():
+    from app.core.paper_trading import PaperTradeStatus
+    from app.core.strategy_lab import metrics_from_paper_trades
+
+    class IncompleteClosedRecord:
+        status = PaperTradeStatus.CLOSED_TAKE_PROFIT
+        net_pnl = 1.0
+        entry_time = 1
+        exit_time = None
+
+    with pytest.raises(ValueError, match="closed_trade_missing_required_fields"):
+        metrics_from_paper_trades([IncompleteClosedRecord()], starting_balance=100)
+
