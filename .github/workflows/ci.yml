@@ -22,6 +22,20 @@ jobs:
       - name: pytest (incl. Python↔JS parity via Node)
         run: python -m pytest
 
+  python-worker-dry-run:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: workers/ronin-core-python
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install uv
+        uses: astral-sh/setup-uv@v6
+      - name: Install Python Worker toolchain
+        run: uv sync --all-groups
+      - name: Build Python Worker bundle without deploying
+        run: uv run pywrangler deploy --dry-run --config wrangler.jsonc
+
   worker-static-checks:
     runs-on: ubuntu-latest
     steps:
@@ -30,7 +44,7 @@ jobs:
         run: |
           node --check workers/ronin-panel/worker.js
           node --check workers/ronin-panel/analysis.js
-      - name: wrangler config JSON validity
+      - name: Wrangler config JSON validity
         run: |
           python3 - << 'PYEOF'
           import json, re
