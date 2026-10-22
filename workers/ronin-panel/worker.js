@@ -995,7 +995,7 @@ function normalizeMarketSymbol(symbol) {
   return supported.includes(normalized) ? normalized : null;
 }
 
-async function marketDataPage(symbol = "btc_usdt", interval = "15m") {
+async function marketDataPage(symbol = "btc_usdt", interval = "15m", env = {}) {
   const intervals = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } };
   symbol = normalizeMarketSymbol(symbol);
   if (!symbol) return { text: "Unsupported asset. Choose BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, BNBUSDT, or DOGEUSDT." };
