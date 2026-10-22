@@ -7,6 +7,8 @@ def test_python_worker_fails_closed_until_routes_are_migrated():
     source = Path("workers/ronin-core-python/entry.py").read_text(encoding="utf-8")
     assert "INTERNAL_API_SECRET" in source
     assert "hmac.compare_digest" in source
+    assert 'supplied.encode("utf-8")' in source
+    assert 'secret.encode("utf-8")' in source
     assert '"route_not_ready"' in source
     assert '"live_trading_enabled": False' in source
     assert "urlsplit(request.url)" in source
