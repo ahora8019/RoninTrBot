@@ -121,7 +121,8 @@ class Default(WorkerEntrypoint):
                     AsyncLBankMarketDataClient, AsyncMarketDataError,
                 )
                 client = AsyncLBankMarketDataClient(fetch)
-                symbol = market_match.group(1).lower()\n                candles = await client.fetch_ohlcv(symbol, intervals[0], limit)
+                symbol = market_match.group(1).lower()
+                candles = await client.fetch_ohlcv(symbol, intervals[0], limit)
             except ValueError:
                 return _json_response(422, {
                     "ok": False, "request_id": request_id, "data": None,
