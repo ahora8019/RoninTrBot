@@ -1147,14 +1147,14 @@ async function strategyAnalysisPage(symbol = "btc_usdt", interval = "1h", env = 
       if (a?.source !== "lbank" || a?.execution !== "none") throw new Error("python_core_strategy");
       const dirEmoji = a.direction === "long" ? "🟢 LONG" : a.direction === "short" ? "🔴 SHORT" : "⚪ NEUTRAL";
       const fmt = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 8 });
-      return "🧠 RoninTrBot • STRATEGY (Python Core)\\n━━━━━━━━━━━━━━━━━━\\n\\n"
-        + "Asset\\n" + String(a.symbol || symbol).toUpperCase().replace("_", "/") + " · " + interval + "\\n\\n"
-        + "Signal\\n" + dirEmoji + "\\n\\n"
-        + "Score\\n" + a.score + " / 100" + (a.eligible ? "  ✅ above threshold " + a.threshold : "  🔒 below threshold " + a.threshold)
-        + "\\n\\nRSI(14)\\n" + fmt(a.rsi) + "\\n\\nATR(14)\\n" + fmt(a.atr)
-        + "\\n\\n━━━━━━━━━━━━━━━━━━\\n"
-        + (Array.isArray(a.reasons) ? a.reasons.map(r => "• " + r).join("\\n") : "")
-        + "\\n\\n🔒 Python Core analysis only · No order placed";
+      return "🧠 RoninTrBot • STRATEGY (Python Core)\n━━━━━━━━━━━━━━━━━━\n\n"
+        + "Asset\n" + String(a.symbol || symbol).toUpperCase().replace("_", "/") + " · " + interval + "\n\n"
+        + "Signal\n" + dirEmoji + "\n\n"
+        + "Score\n" + a.score + " / 100" + (a.eligible ? "  ✅ above threshold " + a.threshold : "  🔒 below threshold " + a.threshold)
+        + "\n\nRSI(14)\n" + fmt(a.rsi) + "\n\nATR(14)\n" + fmt(a.atr)
+        + "\n\n━━━━━━━━━━━━━━━━━━\n"
+        + (Array.isArray(a.reasons) ? a.reasons.map(r => "• " + r).join("\n") : "")
+        + "\n\n🔒 Python Core analysis only · No order placed";
     }
     const now = Math.floor(Date.now() / 1000);
     const size = 100;
