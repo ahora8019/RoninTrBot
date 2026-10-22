@@ -76,3 +76,21 @@ def test_save_and_restore_preserve_rejected_trade_history(tmp_path):
     assert store.restore(restored)
     assert restored.trades == broker.trades
     assert restored.open_trade is None
+
+
+def test_broker_persists_each_fill_when_store_is_configured(tmp_path):
+    policy = PaperTradingPolicy(starting_balance=1000, fee_rate=0, slippage_rate=0)
+    store = SQLitePaperStore(tmp_path / "integrated.sqlite3")
+    broker = PaperBroker(policy, store=store)
+    opened = broker.on_signal("BTCUSDT", signal(), candle(1))
+    assert opened is not None
+
+    restored = PaperBroker(policy, store=store, restore=True)
+    assert restored.open_trade == opened
+    closed = restored.on_candle(candle(2, high=111, low=99))
+    assert closed is not None and closed.status is PaperTradeStatus.CLOSED_TAKE_PROFIT
+
+    after_restart = PaperBroker(policy, store=store, restore=True)
+    assert after_restart.open_trade is None
+    assert after_restart.trades[-1] == closed
+    assert after_restart.balance == closed.balance_after
