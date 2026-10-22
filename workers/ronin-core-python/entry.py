@@ -13,7 +13,7 @@ from uuid import uuid4
 
 from workers import Response, WorkerEntrypoint
 
-_MARKET_PATH = re.compile(r"^/v1/market/([a-z0-9]+_[a-z0-9]+)/ohlcv$")
+_MARKET_PATH = re.compile(r"^/v1/market/([a-z0-9]+_[a-z0-9]+)/ohlcv$", re.IGNORECASE)
 _ALLOWED_INTERVALS = {"15m", "1h", "4h"}
 _MAX_MARKET_LIMIT = 500
 
@@ -121,7 +121,7 @@ class Default(WorkerEntrypoint):
                     AsyncLBankMarketDataClient, AsyncMarketDataError,
                 )
                 client = AsyncLBankMarketDataClient(fetch)
-                candles = await client.fetch_ohlcv(market_match.group(1), intervals[0], limit)
+                symbol = market_match.group(1).lower()\n                candles = await client.fetch_ohlcv(symbol, intervals[0], limit)
             except ValueError:
                 return _json_response(422, {
                     "ok": False, "request_id": request_id, "data": None,
@@ -146,7 +146,7 @@ class Default(WorkerEntrypoint):
                 "data": {
                     "source": "lbank_public_spot",
                     "market_type": "spot",
-                    "symbol": market_match.group(1),
+                    "symbol": symbol,
                     "interval": intervals[0],
                     "count": len(candles),
                     "candles": [{
