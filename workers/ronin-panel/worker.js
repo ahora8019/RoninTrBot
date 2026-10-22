@@ -1006,7 +1006,7 @@ async function marketDataPage(symbol = "btc_usdt", interval = "15m", env = {}) {
     let candles;
     if (isPythonCoreConfigured(env)) {
       const core = await requestPythonCore(env, "/v1/market/" + encodeURIComponent(symbol) + "/ohlcv?interval=" + encodeURIComponent(interval) + "&limit=" + size);
-      if (core.data?.source !== "lbank" || !Array.isArray(core.data.candles) || core.data.candles.length < 20) throw new Error("python_core_market_data");
+      if (core.data?.source !== "lbank_public_spot" || !Array.isArray(core.data.candles) || core.data.candles.length < 20) throw new Error("python_core_market_data");
       candles = core.data.candles.map(c => ({
         ts: Number(c.timestamp), open: Number(c.open), high: Number(c.high),
         low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
