@@ -13,7 +13,7 @@ def test_fetch_closed_candles_excludes_forming_bar_and_sorts():
         ],
     }
     client = LBankSpotPublicClient(transport=lambda url, timeout: payload)
-    candles = fetch_closed_candles(client, "BTCUSDT", interval="minute5", limit=3, now=1500)
+    candles = fetch_closed_candles(client, "BTCUSDT", interval="minute5", limit=3, now=1499)
     assert [c.timestamp for c in candles] == [0, 900]
     assert all(c.is_closed for c in candles)
 
