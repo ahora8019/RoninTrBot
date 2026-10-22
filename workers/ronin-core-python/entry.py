@@ -23,6 +23,14 @@ def _json_response(status: int, payload: dict, request_id: str) -> Response:
     })
 
 
+def _valid_bearer(authorization: str, secret: str) -> bool:
+    """Validate a bearer token without crashing on non-ASCII attacker input."""
+    scheme, separator, supplied = authorization.partition(" ")
+    if scheme.lower() != "bearer" or not separator or not supplied:
+        return False
+    return hmac.compare_digest(supplied.encode("utf-8"), secret.encode("utf-8"))
+
+
 class Default(WorkerEntrypoint):
     async def fetch(self, request):
         request_id = str(uuid4())
@@ -38,8 +46,7 @@ class Default(WorkerEntrypoint):
             }, request_id)
 
         authorization = request.headers.get("authorization", "")
-        scheme, _, supplied = authorization.partition(" ")
-        if scheme.lower() != "bearer" or not supplied or not hmac.compare_digest(supplied, secret):
+        if not _valid_bearer(authorization, secret):
             return _json_response(401, {
                 "ok": False, "request_id": request_id, "data": None,
                 "error": {"code": "unauthorized", "message": "A valid bearer token is required."}
