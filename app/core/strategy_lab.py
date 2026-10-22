@@ -79,3 +79,35 @@ def calculate_metrics(trades: Iterable[ClosedTradeResult], *, starting_balance: 
         average_win=round(gross_profit / len(wins), 8) if wins else 0.0,
         average_loss=round(sum(losses) / len(losses), 8) if losses else 0.0,
     )
+
+def metrics_from_paper_trades(trades: Iterable[object], *, starting_balance: float) -> StrategyMetrics:
+    """Calculate metrics from PaperBroker trade records, excluding open/rejected trades.
+
+    Accepts PaperTrade-like records to keep the analysis module easy to reuse.
+    Only CLOSED_STOP_LOSS and CLOSED_TAKE_PROFIT records with both timestamps
+    are included; net_pnl already accounts for simulated entry/exit fees.
+    """
+    from app.core.paper_trading import PaperTradeStatus
+
+    closed_results: list[ClosedTradeResult] = []
+    for trade in trades:
+        status = getattr(trade, "status", None)
+        if status not in {
+            PaperTradeStatus.CLOSED_STOP_LOSS,
+            PaperTradeStatus.CLOSED_TAKE_PROFIT,
+        }:
+            continue
+        entry_time = getattr(trade, "entry_time", None)
+        exit_time = getattr(trade, "exit_time", None)
+        net_pnl = getattr(trade, "net_pnl", None)
+        if entry_time is None or exit_time is None or net_pnl is None:
+            raise ValueError("closed_trade_missing_required_fields")
+        closed_results.append(
+            ClosedTradeResult(
+                net_pnl=float(net_pnl),
+                entry_time=int(entry_time),
+                exit_time=int(exit_time),
+            )
+        )
+    return calculate_metrics(closed_results, starting_balance=starting_balance)
+
