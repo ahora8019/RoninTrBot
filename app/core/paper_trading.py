@@ -141,7 +141,7 @@ class PaperBroker:
         gross_pnl = (exit_price - trade.entry_price) * trade.quantity
         exit_fee = exit_price * trade.quantity * self.policy.fee_rate
         net_pnl = gross_pnl - trade.entry_fee - exit_fee
-        self.balance += gross_pnl - exit_fee
+        self.balance += gross_pnl - trade.entry_fee - exit_fee
         closed = PaperTrade(
             trade_id=trade.trade_id, symbol=trade.symbol, status=status,
             entry_time=trade.entry_time, exit_time=candle.timestamp,
