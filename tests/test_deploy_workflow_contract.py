@@ -55,8 +55,8 @@ def test_worker_rejects_telegram_updates_without_webhook_secret() -> None:
 
 def test_deploy_secret_gate_only_runs_on_main() -> None:
     workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
-    assert "secrets-present:\n    if: github.ref == 'refs/heads/main'" in workflow
-    assert "deploy:\n    if: github.ref == 'refs/heads/main'" in workflow
+    assert "secrets-present:\n    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'" in workflow
+    assert "deploy:\n    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'" in workflow
 
 def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
