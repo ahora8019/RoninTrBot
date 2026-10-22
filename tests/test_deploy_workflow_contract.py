@@ -66,5 +66,5 @@ def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     assert 'signal: AbortSignal.timeout(8000)' in worker
     assert '"/v1/market/" + encodeURIComponent(symbol)' in worker
     assert '"/v1/strategy/analysis?symbol="' in worker
-    assert 'core.data?.source !== "lbank"' in worker
+    assert 'core.data?.source !== "lbank_public_spot"' in worker
     assert 'a?.execution !== "none"' in worker
