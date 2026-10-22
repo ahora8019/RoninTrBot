@@ -4,14 +4,14 @@ Public market data only. No account endpoints, credentials, or order placement.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 import math
 import time
-from typing import Callable, Sequence
+from typing import Callable
 
 from app.core.lbank_public import LBankAPIError, LBankSpotPublicClient, LBankTicker24h, _number, _successful, _normalize_symbol
 from app.core.market_scanner import (
-    MarketSnapshot, ScannerPolicy, SymbolDecision, SymbolStatus,
+    MarketType, MarketSnapshot, ScannerPolicy, SymbolDecision, SymbolStatus,
     classify_snapshot, randomized_symbol_order,
 )
 from app.core.strategy_engine import Candle, SignalAction, StrategyPolicy, StrategySignal, evaluate_closed_candles
@@ -106,6 +106,7 @@ def scan_lbank_spot(
         if len(results) >= max_symbols:
             break
         ticker = ticker_by_symbol[symbol]
+        snapshot = None
         try:
             book = client.get_book_ticker(symbol)
             snapshot = client.to_snapshot(ticker, book)
@@ -119,9 +120,12 @@ def scan_lbank_spot(
             signal = evaluate_closed_candles(candles, strategy_policy)
             results.append(SpotScanResult(snapshot.symbol, decision, signal, len(candles)))
         except (LBankAPIError, ValueError, TimeoutError, OSError) as exc:
-            failed = SymbolDecision(snapshot.symbol if "snapshot" in locals() else symbol.replace("_", "").upper(),
-                                    snapshot.market_type if "snapshot" in locals() else __import__("app.core.market_scanner", fromlist=["MarketType"]).MarketType.SPOT,
-                                    SymbolStatus.NO_TRADE, (f"market_data_unavailable:{type(exc).__name__}",))
+            failed = SymbolDecision(
+                snapshot.symbol if snapshot is not None else symbol.replace("_", "").upper(),
+                snapshot.market_type if snapshot is not None else MarketType.SPOT,
+                SymbolStatus.NO_TRADE,
+                (f"market_data_unavailable:{type(exc).__name__}",),
+            )
             results.append(SpotScanResult(failed.symbol, failed, _no_trade_from_decision(failed), 0))
     return results
 
