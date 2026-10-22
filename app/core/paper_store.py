@@ -6,6 +6,7 @@ are restored as one consistent snapshot.
 """
 from __future__ import annotations
 
+from contextlib import closing
 from dataclasses import asdict
 import json
 import math
@@ -26,7 +27,7 @@ class SQLitePaperStore:
         self.database = str(database)
         if self.database != ":memory:":
             Path(self.database).parent.mkdir(parents=True, exist_ok=True)
-        with self._connect() as connection:
+        with closing(self._connect()) as connection, connection:
             connection.execute(
                 """CREATE TABLE IF NOT EXISTS paper_state (
                     singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
