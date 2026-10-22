@@ -1,6 +1,7 @@
-"""Deterministic, in-memory paper broker for long-only Spot simulation.
+"""Deterministic paper broker for long-only Spot simulation.
 
-No exchange account access, credentials, persistence, or real order placement.
+No exchange account access, credentials, or real order placement. SQLite persistence
+is optional and must be explicitly supplied by the caller.
 A caller supplies closed candles in chronological order. When SL and TP both
 fall inside one candle, stop-loss is assumed first (conservative fill policy).
 """
@@ -55,7 +56,7 @@ class PaperTrade:
 class PaperBroker:
     """Small testable paper broker; balance changes only on simulated fills."""
 
-    def __init__(self, policy: PaperTradingPolicy = PaperTradingPolicy()) -> None:
+    def __init__(self, policy: PaperTradingPolicy = PaperTradingPolicy(), *, store: object | None = None, restore: bool = False) -> None:
         values = (policy.starting_balance, policy.fee_rate, policy.slippage_rate)
         if any(not math.isfinite(v) for v in values):
             raise ValueError("paper_policy_values_must_be_finite")
@@ -70,6 +71,15 @@ class PaperBroker:
         self._next_id = 1
         self._open: PaperTrade | None = None
         self.trades: list[PaperTrade] = []
+        self._store = store
+        if restore:
+            if store is None:
+                raise ValueError("restore_requires_paper_store")
+            store.restore(self)  # type: ignore[attr-defined]
+
+    def _persist(self) -> None:
+        if self._store is not None:
+            self._store.save(self)  # type: ignore[attr-defined]
 
     @property
     def open_trade(self) -> PaperTrade | None:
@@ -114,6 +124,7 @@ class PaperBroker:
         self._next_id += 1
         self._open = trade
         self.trades.append(trade)
+        self._persist()
         return trade
 
     def on_candle(self, candle: Candle) -> PaperTrade | None:
@@ -154,6 +165,7 @@ class PaperBroker:
         )
         self._replace_trade(closed)
         self._open = None
+        self._persist()
         return closed
 
     def summary(self) -> dict[str, float | int]:
@@ -184,6 +196,7 @@ class PaperBroker:
         )
         self._next_id += 1
         self.trades.append(trade)
+        self._persist()
         return trade
 
     def _replace_trade(self, updated: PaperTrade) -> None:
