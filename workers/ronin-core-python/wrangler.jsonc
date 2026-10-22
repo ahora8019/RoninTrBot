@@ -1,0 +1,10 @@
+{
+  "$schema": "https://raw.githubusercontent.com/cloudflare/workers-sdk/main/packages/wrangler/config-schema.json",
+  "name": "ronintrbot-python-core-preview",
+  "main": "entry.py",
+  "compatibility_date": "2026-10-22",
+  "compatibility_flags": ["python_workers"],
+  "workers_dev": true,
+  "preview_urls": true,
+  "observability": { "enabled": true }
+}
