@@ -136,3 +136,16 @@ def test_d1_schema_has_primary_key_and_constrained_state():
     schema = Path("workers/ronin-core-python/migrations/0001_paper_idempotency.sql").read_text(encoding="utf-8")
     assert "idempotency_key TEXT PRIMARY KEY" in schema
     assert "state IN ('in_progress', 'completed')" in schema
+
+
+def test_python_worker_treats_whitespace_only_secret_as_unconfigured(monkeypatch):
+    module = _load_worker_module(monkeypatch)
+    worker = module.Default()
+    worker.env = types.SimpleNamespace(INTERNAL_API_SECRET="   \t  ")
+
+    response = __import__("asyncio").run(
+        worker.fetch(FakeRequest("/v1/health", authorization="Bearer anything"))
+    )
+
+    assert response.status == 503
+    assert _decode_response(response)["error"]["code"] == "service_not_configured"
