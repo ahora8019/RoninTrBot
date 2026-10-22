@@ -112,3 +112,31 @@ def test_async_lbank_rejects_gaps_in_candle_series():
 
     asyncio.run(run())
 
+
+
+def test_async_lbank_rejects_api_error_payload():
+    async def run():
+        async def fetcher(url, options):
+            return FakeResponse({"result": False, "error_code": 10005, "data": []})
+
+        client = AsyncLBankMarketDataClient(
+            fetcher, clock=lambda: 1_800_000_000, sleep=lambda _: asyncio.sleep(0)
+        )
+        with pytest.raises(AsyncMarketDataError, match="API error"):
+            await client.fetch_ohlcv("btc_usdt", "1h", 1)
+
+    asyncio.run(run())
+
+
+def test_async_lbank_rejects_missing_candle_data():
+    async def run():
+        async def fetcher(url, options):
+            return FakeResponse({"result": True, "error_code": 0})
+
+        client = AsyncLBankMarketDataClient(
+            fetcher, clock=lambda: 1_800_000_000, sleep=lambda _: asyncio.sleep(0)
+        )
+        with pytest.raises(AsyncMarketDataError, match="missing candle data"):
+            await client.fetch_ohlcv("btc_usdt", "1h", 1)
+
+    asyncio.run(run())
