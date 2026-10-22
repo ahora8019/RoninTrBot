@@ -5,16 +5,18 @@ import re
 
 def test_python_worker_fails_closed_until_routes_are_migrated():
     source = Path("workers/ronin-core-python/entry.py").read_text(encoding="utf-8")
-    assert 'INTERNAL_API_SECRET' in source
-    assert 'hmac.compare_digest' in source
+    assert "INTERNAL_API_SECRET" in source
+    assert "hmac.compare_digest" in source
     assert '"route_not_ready"' in source
     assert '"live_trading_enabled": False' in source
-    assert 'urlsplit(request.url)' in source
+    assert "urlsplit(request.url)" in source
 
 
 def test_python_worker_config_has_python_runtime_and_d1_binding():
     raw = Path("workers/ronin-core-python/wrangler.jsonc").read_text(encoding="utf-8")
-    config = json.loads(re.sub(r"/\*.*?\*/|^\s*//.*$", "", raw, flags=re.S | re.M))
+    raw = re.sub(r"/\*.*?\*/", "", raw, flags=re.S)
+    raw = re.sub(r"^\s*//.*$", "", raw, flags=re.M)
+    config = json.loads(raw)
     assert config["main"] == "entry.py"
     assert "python_workers" in config["compatibility_flags"]
     assert config["d1_databases"][0]["binding"] == "PAPER_DB"
