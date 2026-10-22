@@ -1,10 +1,8 @@
 name: Deploy Worker
 
+# Production deployment is intentionally manual; merging code must never deploy by itself.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ["workers/**", ".github/workflows/deploy-worker.yml"]
 
 permissions:
   contents: read
