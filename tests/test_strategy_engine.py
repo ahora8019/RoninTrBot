@@ -4,6 +4,7 @@ from app.core.strategy_engine import (
     Candle,
     SignalAction,
     StrategyName,
+    StrategyPolicy,
     evaluate_closed_candles,
 )
 
@@ -72,3 +73,19 @@ def test_signal_if_generated_has_positive_risk_reward_and_paper_only():
         }
         assert result.stop_loss < result.entry < result.take_profit
         assert "paper_only" in result.reasons
+
+
+@pytest.mark.parametrize("policy", [
+    StrategyPolicy(ema_fast=0),
+    StrategyPolicy(ema_fast=21, ema_slow=21),
+    StrategyPolicy(rsi_period=0),
+    StrategyPolicy(atr_period=-1),
+    StrategyPolicy(breakout_lookback=0),
+    StrategyPolicy(volume_multiplier=float("nan")),
+    StrategyPolicy(minimum_reward_risk=float("inf")),
+    StrategyPolicy(max_stop_atr=0),
+])
+def test_invalid_strategy_policy_fails_closed_without_exception(policy):
+    result = evaluate_closed_candles(rising_candles(40), policy)
+    assert result.action is SignalAction.NO_TRADE
+    assert result.reasons == ("invalid_strategy_policy",)
