@@ -1,0 +1,16 @@
+services:
+  - type: web
+    name: ronintrbot-python-core-preview
+    runtime: python
+    plan: free
+    region: frankfurt
+    branch: feat/render-python-core-preview
+    buildCommand: pip install -e . gunicorn
+    startCommand: gunicorn app.internal_api:application --bind 0.0.0.0:$PORT --workers 1 --timeout 30
+    envVars:
+      - key: INTERNAL_API_SECRET
+        sync: false
+      - key: RONINTRBOT_LAB_MODE
+        value: "false"
+      - key: PYTHON_VERSION
+        value: "3.12.8"
