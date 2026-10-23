@@ -69,3 +69,4 @@ def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     assert '"/v1/strategy/analysis?symbol="' in worker
     assert 'core.data?.source !== "lbank"' in worker
     assert 'a?.execution !== "none"' in worker
+    assert "const market = await marketDataPage(symbol, interval, env);" in worker  # inline callback must use configured Python Core
