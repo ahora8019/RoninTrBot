@@ -249,7 +249,7 @@ export default {
           const symbol = timeframeMatch[1];
           const interval = timeframeMatch[2];
           await bot.editMessageText(chatId, messageId, "⏳ Loading " + symbol.toUpperCase() + " · " + interval + " chart…", backKeyboard());
-          const market = await marketDataPage(symbol, interval);
+          const market = await marketDataPage(symbol, interval, env);
           if (market.imageBlob || market.chartUrl) {
             const sent = await bot.sendPhoto(chatId, market.imageBlob || market.chartUrl, market.caption, backKeyboard());
             if (!sent?.ok) await bot.sendMessage(chatId, "Chart image failed to send. Please retry from Market Data.", backKeyboard());
@@ -2190,6 +2190,8 @@ async function requestPythonCore(env, path) {
   const response = await fetch(url, {
     method: "GET",
     headers: { Accept: "application/json", Authorization: "Bearer " + secret },
+    // Never follow redirects from the configured Core origin: the request carries a service secret.
+    redirect: "error",
     signal: AbortSignal.timeout(8000),
   });
   let payload;
