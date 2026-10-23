@@ -64,6 +64,7 @@ def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     assert 'base.protocol !== "https:"' in worker
     assert 'Authorization: "Bearer " + secret' in worker
     assert 'signal: AbortSignal.timeout(8000)' in worker
+    assert 'redirect: "error"' in worker  # service-authenticated requests must not follow redirects
     assert '"/v1/market/" + encodeURIComponent(symbol)' in worker
     assert '"/v1/strategy/analysis?symbol="' in worker
     assert 'core.data?.source !== "lbank"' in worker
