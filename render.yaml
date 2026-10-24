@@ -4,6 +4,7 @@ services:
     runtime: python
     plan: free
     region: frankfurt
+    healthCheckPath: /healthz
     branch: feat/render-python-core-preview
     buildCommand: pip install -e . gunicorn
     startCommand: gunicorn app.internal_api:application --bind 0.0.0.0:$PORT --workers 1 --timeout 30
