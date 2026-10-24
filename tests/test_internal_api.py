@@ -78,7 +78,9 @@ def test_platform_health_probe_is_available_without_internal_secret():
     )
 
     assert status == "200 OK"
-    assert payload is None  # HEAD health probes return headers without a body.
+    assert payload["ok"] is True
+    assert payload["data"] == {"status": "ok"}
+    assert payload["error"] is None
 
 
 def test_fails_closed_when_internal_secret_is_not_configured():
@@ -389,11 +391,10 @@ def test_paper_session_releases_reservation_after_unexpected_failure(monkeypatch
 def test_platform_root_head_probe_is_available_without_internal_secret():
     app = create_app(secret="")
 
-    status, _, payload = request(
+    status, headers, payload = request(
         app, path="/", method="HEAD", authorization=None
     )
 
     assert status == "200 OK"
-    assert payload["ok"] is True
-    assert payload["data"] == {"status": "ok"}
-    assert payload["error"] is None
+    assert int(headers["Content-Length"]) > 0
+    assert payload is None
