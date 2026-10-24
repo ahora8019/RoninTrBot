@@ -36,7 +36,8 @@ def request(app, path="/v1/health", *, query_string="", method="GET", authorizat
     if extra_headers:
         environ.update(extra_headers)
     body = b"".join(app(environ, start_response))
-    return captured["status"], captured["headers"], json.loads(body)
+    payload = json.loads(body) if body else None
+    return captured["status"], captured["headers"], payload
 
 
 def test_health_is_authenticated_and_reports_build_metadata():
@@ -77,9 +78,7 @@ def test_platform_health_probe_is_available_without_internal_secret():
     )
 
     assert status == "200 OK"
-    assert payload["ok"] is True
-    assert payload["data"] == {"status": "ok"}
-    assert payload["error"] is None
+    assert payload is None  # HEAD health probes return headers without a body.
 
 
 def test_fails_closed_when_internal_secret_is_not_configured():
