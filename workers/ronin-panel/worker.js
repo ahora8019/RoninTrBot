@@ -249,7 +249,7 @@ export default {
           const symbol = timeframeMatch[1];
           const interval = timeframeMatch[2];
           await bot.editMessageText(chatId, messageId, "⏳ Loading " + symbol.toUpperCase() + " · " + interval + " chart…", backKeyboard());
-          const market = await marketDataPage(symbol, interval);
+          const market = await marketDataPage(symbol, interval, env);
           if (market.imageBlob || market.chartUrl) {
             const sent = await bot.sendPhoto(chatId, market.imageBlob || market.chartUrl, market.caption, backKeyboard());
             if (!sent?.ok) await bot.sendMessage(chatId, "Chart image failed to send. Please retry from Market Data.", backKeyboard());
@@ -2176,7 +2176,7 @@ function roleEmoji(role) {
 
 function isPythonCoreConfigured(env) {
   // If either setting exists, require a complete configuration; never silently bypass a partial setup.
-  return Boolean(env?.PYTHON_CORE_URL || env?.INTERNAL_API_SECRET);
+  return Boolean(String(env?.PYTHON_CORE_URL || "").trim() && String(env?.INTERNAL_API_SECRET || ""));
 }
 
 async function requestPythonCore(env, path) {
