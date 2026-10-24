@@ -69,6 +69,19 @@ def test_rejects_missing_or_invalid_bearer_token():
         assert "test-secret" not in json.dumps(payload)
 
 
+def test_platform_health_probe_is_available_without_internal_secret():
+    app = create_app(secret="")
+
+    status, _, payload = request(
+        app, path="/healthz", authorization=None
+    )
+
+    assert status == "200 OK"
+    assert payload["ok"] is True
+    assert payload["data"] == {"status": "ok"}
+    assert payload["error"] is None
+
+
 def test_fails_closed_when_internal_secret_is_not_configured():
     app = create_app(secret="")
 

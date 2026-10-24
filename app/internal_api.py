@@ -112,6 +112,16 @@ def create_app(
         method = environ.get("REQUEST_METHOD", "GET").upper()
         path = environ.get("PATH_INFO", "/")
 
+        # Render's platform health probe must not depend on application secrets.
+        # This endpoint intentionally reveals no build metadata or configuration.
+        if method == "GET" and path == "/healthz":
+            return respond(
+                start_response,
+                HTTPStatus.OK,
+                request_id,
+                data={"status": "ok"},
+            )
+
         if not configured_secret:
             return error_response(
                 start_response,
