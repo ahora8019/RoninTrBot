@@ -996,6 +996,7 @@ function normalizeMarketSymbol(symbol) {
 }
 
 async function marketDataPage(symbol = "btc_usdt", interval = "15m", env = {}) {
+  if (!isPythonCoreConfigured(env)) return { text: "Python Core is not connected. Configure PYTHON_CORE_URL and INTERNAL_API_SECRET on the Worker; direct market-data fallback is disabled." };
   const intervals = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } };
   symbol = normalizeMarketSymbol(symbol);
   if (!symbol) return { text: "Unsupported asset. Choose BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, BNBUSDT, or DOGEUSDT." };
@@ -1140,6 +1141,7 @@ function strategyTimeframeKeyboard(symbol) {
 /* Live strategy analysis, powered by the JS port of the Python core
    (workers/ronin-panel/analysis.js — CI-verified parity with app/strategy). */
 async function strategyAnalysisPage(symbol = "btc_usdt", interval = "1h", env = {}) {
+  if (!isPythonCoreConfigured(env)) return "🔒 Python Core is not connected. Configure PYTHON_CORE_URL and INTERNAL_API_SECRET on the Worker. No fallback analysis is used.";
   try {
     if (isPythonCoreConfigured(env)) {
       const core = await requestPythonCore(env, "/v1/strategy/analysis?symbol=" + encodeURIComponent(symbol) + "&interval=" + encodeURIComponent(interval));
