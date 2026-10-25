@@ -2192,6 +2192,7 @@ async function requestPythonCore(env, path) {
   const response = await fetch(url, {
     method: "GET",
     headers: { Accept: "application/json", Authorization: "Bearer " + secret },
+    redirect: "error",
     signal: AbortSignal.timeout(8000),
   });
   let payload;
