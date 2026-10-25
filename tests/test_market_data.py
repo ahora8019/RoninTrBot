@@ -100,6 +100,62 @@ def test_limit_above_window_safe_maximum_is_rejected():
     assert calls == []
 
 
+def test_invalid_utf8_response_is_normalized_to_market_data_error(monkeypatch):
+    import app.market_data.lbank as lbank_module
+
+    class InvalidUtf8Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            return b"\xff\xfe"
+
+    monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: InvalidUtf8Response())
+    with pytest.raises(MarketDataError, match="UnicodeDecodeError"):
+        lbank_module._default_transport("https://example.invalid", {}, 1.0)
+
+
+def test_truncated_http_body_is_normalized_to_market_data_error(monkeypatch):
+    from http.client import IncompleteRead
+
+    import app.market_data.lbank as lbank_module
+
+    class TruncatedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            raise IncompleteRead(b'{"result":', 8)
+
+    monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: TruncatedResponse())
+    with pytest.raises(MarketDataError, match="IncompleteRead"):
+        lbank_module._default_transport("https://example.invalid", {}, 1.0)
+
+
+def test_excessively_nested_json_response_is_normalized_to_market_data_error(monkeypatch):
+    import app.market_data.lbank as lbank_module
+
+    class DeeplyNestedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            return b"[" * 10000 + b"]" * 10000
+
+    monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: DeeplyNestedResponse())
+    with pytest.raises(MarketDataError, match="RecursionError"):
+        lbank_module._default_transport("https://example.invalid", {}, 1.0)
+
+
 def test_oversized_response_is_rejected(monkeypatch):
     import app.market_data.lbank as lbank_module
 

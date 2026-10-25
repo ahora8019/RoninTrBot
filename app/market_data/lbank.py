@@ -10,6 +10,7 @@ import json
 import re
 import threading
 import time
+from http.client import IncompleteRead
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from typing import Any, Callable, Mapping
@@ -81,7 +82,7 @@ def _default_transport(url: str, params: Mapping[str, str], timeout: float) -> A
         except Exception:
             pass
         raise MarketDataHTTPError(exc.code, detail) from None
-    except (URLError, TimeoutError, json.JSONDecodeError) as exc:
+    except (URLError, TimeoutError, IncompleteRead, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as exc:
         raise MarketDataError(f"LBank market-data request failed: {type(exc).__name__}") from None
 
 
