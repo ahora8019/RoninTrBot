@@ -237,7 +237,11 @@ def create_app(
                     "unsupported_paper_policy", "Only the trend policy is available in this paper API slice.",
                 )
             ref = payload.get("candles_ref")
-            match = re.fullmatch(r"lbank:([a-z0-9]+_[a-z0-9]+):(15m|1h|4h):(60|[6-9][0-9]|1[0-9][0-9]|200)", ref or "")
+            match = (
+                re.fullmatch(r"lbank:([a-z0-9]+_[a-z0-9]+):(15m|1h|4h):(60|[6-9][0-9]|1[0-9][0-9]|200)", ref)
+                if isinstance(ref, str)
+                else None
+            )
             if not match:
                 return error_response(
                     start_response, request_id, HTTPStatus.UNPROCESSABLE_ENTITY,

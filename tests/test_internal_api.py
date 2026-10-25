@@ -372,3 +372,20 @@ def test_paper_session_releases_reservation_after_unexpected_failure(monkeypatch
     assert retried == "200 OK"
     assert result["data"]["mode"] == "paper"
     assert client.calls == 2
+
+
+def test_paper_session_rejects_non_string_candles_ref_without_server_error(monkeypatch, tmp_path):
+    monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
+    monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+    app = create_app(secret="test-secret")
+
+    for index, invalid_ref in enumerate((123, [], {"symbol": "btc_usdt"})):
+        status, _, payload = request(
+            app,
+            path="/v1/paper/session",
+            method="POST",
+            body={"policy": "trend", "candles_ref": invalid_ref},
+            extra_headers={"HTTP_IDEMPOTENCY_KEY": f"invalid-ref-{index}-key"},
+        )
+        assert status == "422 Unprocessable Entity"
+        assert payload["error"]["code"] == "invalid_candles_ref"
