@@ -60,11 +60,19 @@ def test_deploy_secret_gate_only_runs_on_main() -> None:
 
 def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
-    assert 'return Boolean(env?.PYTHON_CORE_URL || env?.INTERNAL_API_SECRET)' in worker
+    assert 'return Boolean(String(env?.PYTHON_CORE_URL || "").trim() && String(env?.INTERNAL_API_SECRET || ""))' in worker
     assert 'base.protocol !== "https:"' in worker
     assert 'Authorization: "Bearer " + secret' in worker
+    assert 'redirect: "error"' in worker  # authenticated core requests must not forward secrets across redirects
     assert 'signal: AbortSignal.timeout(8000)' in worker
     assert '"/v1/market/" + encodeURIComponent(symbol)' in worker
     assert '"/v1/strategy/analysis?symbol="' in worker
     assert 'core.data?.source !== "lbank"' in worker
     assert 'a?.execution !== "none"' in worker
+
+
+def test_worker_has_no_direct_lbank_or_javascript_strategy_fallback() -> None:
+    worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
+    assert "api.lbkex.com/v2/kline.do" not in worker
+    assert "analyzeTimeframe(" not in worker
+    assert "classifyRegime(" not in worker
