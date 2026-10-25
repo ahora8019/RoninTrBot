@@ -112,6 +112,18 @@ def create_app(
         method = environ.get("REQUEST_METHOD", "GET").upper()
         path = environ.get("PATH_INFO", "/")
 
+        # Render's platform health probe must not depend on application secrets.
+        # This endpoint intentionally reveals no build metadata or configuration.
+        if method in {"GET", "HEAD"} and path in {"/", "/healthz"}:
+            health_response = respond(
+                start_response,
+                HTTPStatus.OK,
+                request_id,
+                data={"status": "ok"},
+            )
+            # WSGI applications must not send a response body for HEAD requests.
+            return [] if method == "HEAD" else health_response
+
         if not configured_secret:
             return error_response(
                 start_response,

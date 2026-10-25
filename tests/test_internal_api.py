@@ -36,7 +36,8 @@ def request(app, path="/v1/health", *, query_string="", method="GET", authorizat
     if extra_headers:
         environ.update(extra_headers)
     body = b"".join(app(environ, start_response))
-    return captured["status"], captured["headers"], json.loads(body)
+    payload = json.loads(body) if body else None
+    return captured["status"], captured["headers"], payload
 
 
 def test_health_is_authenticated_and_reports_build_metadata():
@@ -67,6 +68,19 @@ def test_rejects_missing_or_invalid_bearer_token():
         assert payload["data"] is None
         assert payload["error"]["code"] == "unauthorized"
         assert "test-secret" not in json.dumps(payload)
+
+
+def test_platform_health_probe_is_available_without_internal_secret():
+    app = create_app(secret="")
+
+    status, _, payload = request(
+        app, path="/healthz", authorization=None
+    )
+
+    assert status == "200 OK"
+    assert payload["ok"] is True
+    assert payload["data"] == {"status": "ok"}
+    assert payload["error"] is None
 
 
 def test_fails_closed_when_internal_secret_is_not_configured():
@@ -372,3 +386,15 @@ def test_paper_session_releases_reservation_after_unexpected_failure(monkeypatch
     assert retried == "200 OK"
     assert result["data"]["mode"] == "paper"
     assert client.calls == 2
+
+
+def test_platform_root_head_probe_is_available_without_internal_secret():
+    app = create_app(secret="")
+
+    status, headers, payload = request(
+        app, path="/", method="HEAD", authorization=None
+    )
+
+    assert status == "200 OK"
+    assert int(headers["Content-Length"]) > 0
+    assert payload is None
