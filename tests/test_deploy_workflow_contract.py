@@ -7,7 +7,9 @@ def test_worker_deploy_preserves_dashboard_managed_role_variables() -> None:
     workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
     assert 'CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}' in workflow
     assert 'CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}' in workflow
-    assert 'paths: ["workers/**", ".github/workflows/deploy-worker.yml"]' in workflow
+    trigger = workflow.split("permissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger
+    assert "push:" not in trigger
     assert "--keep-vars" in workflow
 
 
@@ -30,10 +32,13 @@ def test_worker_deploy_target_matches_project_account_resources() -> None:
     assert "https://ronintrbot.ahora-project.workers.dev" in workflow
 
 
-def test_backup_docs_do_not_trigger_worker_deployment() -> None:
+def test_merging_code_does_not_automatically_deploy_worker() -> None:
     workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
-    assert "branches: [main]" in workflow
-    assert 'paths: ["workers/**", ".github/workflows/deploy-worker.yml"]' in workflow
+    trigger = workflow.split("permissions:", 1)[0]
+    assert "workflow_dispatch:" in trigger
+    assert "push:" not in trigger
+    assert "pull_request:" not in trigger
+    assert "branches:" not in trigger
 
 
 def test_market_data_accepts_compact_and_underscored_symbols() -> None:
@@ -50,5 +55,16 @@ def test_worker_rejects_telegram_updates_without_webhook_secret() -> None:
 
 def test_deploy_secret_gate_only_runs_on_main() -> None:
     workflow = Path(".github/workflows/deploy-worker.yml").read_text(encoding="utf-8")
-    assert "secrets-present:\n    if: github.ref == 'refs/heads/main'" in workflow
-    assert "deploy:\n    if: github.ref == 'refs/heads/main'" in workflow
+    assert "secrets-present:\n    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'" in workflow
+    assert "deploy:\n    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'" in workflow
+
+def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
+    worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
+    assert 'return Boolean(env?.PYTHON_CORE_URL || env?.INTERNAL_API_SECRET)' in worker
+    assert 'base.protocol !== "https:"' in worker
+    assert 'Authorization: "Bearer " + secret' in worker
+    assert 'signal: AbortSignal.timeout(8000)' in worker
+    assert '"/v1/market/" + encodeURIComponent(symbol)' in worker
+    assert '"/v1/strategy/analysis?symbol="' in worker
+    assert 'core.data?.source !== "lbank"' in worker
+    assert 'a?.execution !== "none"' in worker

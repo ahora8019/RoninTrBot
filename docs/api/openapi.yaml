@@ -28,30 +28,34 @@ paths:
     get:
       operationId: getMarketCandles
       parameters:
-        - { name: symbol, in: path, required: true, schema: { type: string, pattern: "^[a-z]+_[a-z]+$" } }
+        - { name: symbol, in: path, required: true, schema: { type: string, pattern: "^[a-z0-9]+_[a-z0-9]+$" } }
         - { name: interval, in: query, required: true, schema: { type: string, enum: ["15m", "1h", "4h"] } }
         - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 1200, default: 200 } }
       responses:
         "200": { $ref: "#/components/responses/envelope" }
         "422": { $ref: "#/components/responses/error" }
+        "502": { $ref: "#/components/responses/error" }
   /v1/strategy/analysis:
     get:
       operationId: getStrategyAnalysis
+      summary: Read-only, explainable single-timeframe analysis over public LBank spot candles.
       parameters:
-        - { name: symbol, in: query, required: true, schema: { type: string } }
+        - { name: symbol, in: query, required: true, schema: { type: string, pattern: "^[a-z0-9]+_[a-z0-9]+$" } }
         - { name: interval, in: query, required: true, schema: { type: string, enum: ["15m", "1h", "4h"] } }
       responses:
         "200": { $ref: "#/components/responses/envelope" }
+        "422": { $ref: "#/components/responses/error" }
+        "502": { $ref: "#/components/responses/error" }
   /v1/paper/status:
     get:
       operationId: getPaperStatus
-      summary: Paper engine state (equity, open position, decisions tail, halted flag).
+      summary: Read-only paper status; session counters are process-local and reset on restart.
       responses:
         "200": { $ref: "#/components/responses/envelope" }
   /v1/paper/session:
     post:
       operationId: runPaperSession
-      summary: Run a paper session replay. LAB-ONLY (403 outside lab environment).
+      summary: Run a trend-policy paper replay. LAB-ONLY (403 outside lab environment).
       parameters:
         - { name: Idempotency-Key, in: header, required: true,
             schema: { type: string, minLength: 8, maxLength: 128 },
@@ -64,19 +68,15 @@ paths:
               type: object
               required: [policy, candles_ref]
               properties:
-                policy: { type: string, enum: ["trend", "breakout"] }
-                candles_ref: { type: string, description: "Server-side dataset handle; raw candle upload is never accepted." }
+                policy: { type: string, enum: ["trend"] }
+                candles_ref: { type: string, pattern: "^lbank:[a-z0-9]+_[a-z0-9]+:(15m|1h|4h):(60|[6-9][0-9]|1[0-9][0-9]|200)$", description: "Public LBank spot replay selector, e.g. lbank:btc_usdt:1h:200; raw candle upload is never accepted." }
       responses:
         "200": { $ref: "#/components/responses/envelope" }
         "403": { $ref: "#/components/responses/error" }
-  /v1/reports/{report_id}:
-    get:
-      operationId: getReport
-      parameters:
-        - { name: report_id, in: path, required: true, schema: { type: string } }
-      responses:
-        "200": { $ref: "#/components/responses/envelope" }
-        "404": { $ref: "#/components/responses/error" }
+        "409": { $ref: "#/components/responses/error" }
+        "422": { $ref: "#/components/responses/error" }
+        "502": { $ref: "#/components/responses/error" }
+        "503": { $ref: "#/components/responses/error" }
 components:
   securitySchemes:
     serviceAuth:
