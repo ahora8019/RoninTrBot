@@ -161,7 +161,7 @@ export default {
 
           await bot.sendMessage(
             chatId,
-            systemStatus(role),
+            systemStatus(role, env),
             statusKeyboard(role)
           );
         }
@@ -288,7 +288,7 @@ export default {
 
           case "status":
 
-            text = systemStatus(role);
+            text = systemStatus(role, env);
             keyboard = statusKeyboard(role);
 
             break;
@@ -878,7 +878,7 @@ Analysis
    SYSTEM
 ===================================================== */
 
-function systemStatus(role) {
+function systemStatus(role, env) {
 
   return `
 ⚡ RoninTrBot • SYSTEM
@@ -912,7 +912,7 @@ WAITING
 READY
 
 📢 Broadcast
-${"USERS_KV" in {} ? "READY" : "CONFIGURED"}
+${env.USERS_KV ? "READY" : "MISSING"}
 
 ━━━━━━━━━━━━━━━━━━
 
