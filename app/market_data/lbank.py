@@ -213,7 +213,7 @@ class LBankMarketDataClient:
         timestamps = [candle.timestamp for candle in candles]
         if len(timestamps) != len(set(timestamps)):
             raise MarketDataValidationError("LBank returned duplicate candle timestamps")
-        if any(timestamp > now + interval_seconds for timestamp in timestamps):
+        if any(timestamp > now for timestamp in timestamps):
             raise MarketDataValidationError("LBank returned a candle timestamp in the future")
         if any(timestamp % interval_seconds != 0 for timestamp in timestamps):
             raise MarketDataValidationError(f"LBank returned a candle not aligned to the {interval} interval")
