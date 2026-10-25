@@ -69,3 +69,10 @@ def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     assert '"/v1/strategy/analysis?symbol="' in worker
     assert 'core.data?.source !== "lbank"' in worker
     assert 'a?.execution !== "none"' in worker
+
+
+def test_worker_has_no_direct_lbank_or_javascript_strategy_fallback() -> None:
+    worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
+    assert "api.lbkex.com/v2/kline.do" not in worker
+    assert "analyzeTimeframe(" not in worker
+    assert "classifyRegime(" not in worker
