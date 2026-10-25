@@ -73,6 +73,12 @@ def test_fetch_history_returns_the_most_recent_limit_candles():
     assert [c.timestamp for c in candles] == [NOW - 1800, NOW - 900]
 
 
+def test_rejects_future_dated_candle_even_within_one_interval():
+    client, _ = client_with({"result": "true", "error_code": 0, "data": [row(NOW + 900)]})
+    with pytest.raises(MarketDataValidationError, match="future"):
+        client.fetch_ohlcv("btc_usdt", "15m", 1)
+
+
 def test_rejects_unaligned_candle_timestamp():
     payload = {"result": "true", "error_code": 0, "data": [row(NOW - 870)]}
     client, _ = client_with(payload)

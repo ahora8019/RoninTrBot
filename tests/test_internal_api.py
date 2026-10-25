@@ -174,13 +174,13 @@ def test_market_ohlcv_maps_upstream_failure_to_safe_bad_gateway():
     assert "private upstream detail" not in json.dumps(payload)
 
 
-def test_strategy_analysis_endpoint_returns_explainable_lbank_signal():
+def test_strategy_analysis_endpoint_returns_explainable_lbank_signal(monkeypatch):
     from decimal import Decimal
     from app.market_data.lbank import Candle
 
     class FakeMarketDataClient:
         def fetch_ohlcv(self, symbol, interval, limit):
-            assert (symbol, interval, limit) == ("btc_usdt", "1h", 200)
+            assert (symbol, interval, limit) == ("btc_usdt", "1h", 201)
             return [
                 Candle(1_800_000_000 + i * 3600,
                        Decimal(100 + i), Decimal(102 + i), Decimal(99 + i),
@@ -188,6 +188,7 @@ def test_strategy_analysis_endpoint_returns_explainable_lbank_signal():
                 for i in range(60)
             ]
 
+    monkeypatch.setattr("app.internal_api.time.time", lambda: 1_800_000_000 + 100 * 3600)
     app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
     status, headers, payload = request(
         app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt&interval=1h"
@@ -280,13 +281,14 @@ def test_paper_session_replays_completed_result_without_refetching_market_data(m
 
     monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
     monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+    monkeypatch.setattr("app.internal_api.time.time", lambda: 1_800_000_000 + 100 * 3600)
 
     class FakeMarketDataClient:
         calls = 0
 
         def fetch_ohlcv(self, symbol, interval, limit):
             self.calls += 1
-            assert (symbol, interval, limit) == ("btc_usdt", "1h", 60)
+            assert (symbol, interval, limit) == ("btc_usdt", "1h", 61)
             return [
                 Candle(1_800_000_000 + i * 3600, Decimal(100 + i),
                        Decimal(102 + i), Decimal(99 + i), Decimal(101 + i), Decimal("10"))
@@ -313,6 +315,7 @@ def test_paper_session_rejects_same_key_with_different_payload(monkeypatch, tmp_
 
     monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
     monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+    monkeypatch.setattr("app.internal_api.time.time", lambda: 1_800_000_000 + 100 * 3600)
 
     class FakeMarketDataClient:
         def fetch_ohlcv(self, symbol, interval, limit):
@@ -344,6 +347,7 @@ def test_paper_session_releases_reservation_after_unexpected_failure(monkeypatch
 
     monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
     monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+    monkeypatch.setattr("app.internal_api.time.time", lambda: 1_800_000_000 + 100 * 3600)
 
     class FlakyMarketDataClient:
         calls = 0
@@ -372,3 +376,117 @@ def test_paper_session_releases_reservation_after_unexpected_failure(monkeypatch
     assert retried == "200 OK"
     assert result["data"]["mode"] == "paper"
     assert client.calls == 2
+
+
+def test_strategy_analysis_excludes_forming_candle(monkeypatch):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    now = 1_800_000_000 + 60 * 3600 + 1800
+    monkeypatch.setattr("app.internal_api.time.time", lambda: now)
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            assert (symbol, interval, limit) == ("btc_usdt", "1h", 201)
+            return [
+                Candle(1_800_000_000 + i * 3600,
+                       Decimal(100 + i), Decimal(102 + i), Decimal(99 + i),
+                       Decimal(101 + i), Decimal("10"))
+                for i in range(61)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    status, _, payload = request(
+        app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt&interval=1h"
+    )
+
+    assert status == "200 OK"
+    assert payload["data"]["close"] == "160"
+
+
+def test_paper_session_excludes_forming_candle(monkeypatch, tmp_path):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
+    monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+    now = 1_800_000_000 + 60 * 3600 + 1800
+    monkeypatch.setattr("app.internal_api.time.time", lambda: now)
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            assert (symbol, interval, limit) == ("btc_usdt", "1h", 61)
+            return [
+                Candle(1_800_000_000 + i * 3600, Decimal(100 + i),
+                       Decimal(102 + i), Decimal(99 + i), Decimal(101 + i), Decimal("10"))
+                for i in range(61)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    status, _, payload = request(
+        app,
+        path="/v1/paper/session",
+        method="POST",
+        body={"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:60"},
+        extra_headers={"HTTP_IDEMPOTENCY_KEY": "closed-candle-key"},
+    )
+
+    assert status == "200 OK"
+    assert payload["data"]["candles_processed"] == 60
+
+
+def test_strategy_analysis_uses_request_start_time_for_candle_closure(monkeypatch):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    clock = {"now": 1_800_000_000 + 60 * 3600 - 1}
+    monkeypatch.setattr("app.internal_api.time.time", lambda: clock["now"])
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            clock["now"] += 2
+            return [
+                Candle(1_800_000_000 + i * 3600,
+                       Decimal(100 + i), Decimal(102 + i), Decimal(99 + i),
+                       Decimal(101 + i), Decimal("10"))
+                for i in range(61)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    status, _, payload = request(
+        app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt&interval=1h"
+    )
+
+    assert status == "200 OK"
+    assert payload["data"]["close"] == "159"
+
+
+def test_paper_session_uses_request_start_time_for_candle_closure(monkeypatch, tmp_path):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
+    monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+    clock = {"now": 1_800_000_000 + 60 * 3600 - 1}
+    monkeypatch.setattr("app.internal_api.time.time", lambda: clock["now"])
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            clock["now"] += 2
+            return [
+                Candle(1_800_000_000 + i * 3600, Decimal(100 + i),
+                       Decimal(102 + i), Decimal(99 + i), Decimal(101 + i), Decimal("10"))
+                for i in range(61)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    status, _, payload = request(
+        app,
+        path="/v1/paper/session",
+        method="POST",
+        body={"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:60"},
+        extra_headers={"HTTP_IDEMPOTENCY_KEY": "closed-candle-race-key"},
+    )
+
+    assert status == "502 Bad Gateway"
+    assert payload["error"]["code"] == "market_data_unavailable"

@@ -17,7 +17,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 from wsgiref.simple_server import make_server
 
-from app.market_data.lbank import LBankMarketDataClient, MarketDataError
+from app.market_data.lbank import LBankMarketDataClient, MarketDataError, MarketDataValidationError
 from app.strategy.indicators import Candle as StrategyCandle, SIGNAL_THRESHOLD, analyze_timeframe
 from app.paper.portfolio import PaperConfig, PaperEngine
 from app.paper.runner import run_paper_session
@@ -34,6 +34,7 @@ _JSON_HEADERS = [
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _MARKET_PATH = re.compile(r"^/v1/market/([a-z0-9]+_[a-z0-9]+)/ohlcv$")
 _ALLOWED_INTERVALS = {"15m", "1h", "4h"}
+_INTERVAL_SECONDS = {"15m": 15 * 60, "1h": 60 * 60, "4h": 4 * 60 * 60}
 _MAX_MARKET_LIMIT = 1200
 
 
@@ -265,10 +266,23 @@ def create_app(
                 )
             symbol, interval, limit = match.group(1), match.group(2), int(match.group(3))
             try:
-                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit)
+                # Capture time before the request: a candle that closes while
+                # the network call is in flight was not guaranteed closed in
+                # the returned snapshot, so conservatively exclude it.
+                interval_seconds = _INTERVAL_SECONDS[interval]
+                now = int(time.time())
+                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit + 1)
+                closed_candles = [
+                    candle for candle in raw_candles
+                    if candle.timestamp + interval_seconds <= now
+                ][-limit:]
+                if len(closed_candles) < limit:
+                    raise MarketDataValidationError(
+                        f"LBank returned only {len(closed_candles)} closed candles; {limit} required"
+                    )
                 candles = tuple(StrategyCandle(
                     candle.timestamp, candle.open, candle.high, candle.low, candle.close, candle.volume
-                ) for candle in raw_candles)
+                ) for candle in closed_candles)
                 policy = TrendPolicy(
                     timeframe=interval, market_type="spot", symbol=symbol,
                     limits=RiskLimits(max_notional_fraction=Decimal("0.95")),
@@ -353,7 +367,13 @@ def create_app(
                 )
             symbol, interval = symbols[0], intervals[0]
             try:
-                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, 200)
+                # Capture time before the request so a candle that closes
+                # during network latency is not treated as finalized data.
+                interval_seconds = _INTERVAL_SECONDS[interval]
+                now = int(time.time())
+                # Ask for one extra row because the last LBank candle may
+                # still be forming and must not influence a strategy signal.
+                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, 201)
             except MarketDataError:
                 return error_response(
                     start_response,
@@ -371,12 +391,16 @@ def create_app(
                     "The symbol or interval is invalid.",
                 )
 
+            closed_candles = [
+                candle for candle in raw_candles
+                if candle.timestamp + interval_seconds <= now
+            ][-200:]
             candles = tuple(
                 StrategyCandle(
                     candle.timestamp, candle.open, candle.high, candle.low,
                     candle.close, candle.volume,
                 )
-                for candle in raw_candles
+                for candle in closed_candles
             )
             try:
                 analysis = analyze_timeframe(interval, candles)
