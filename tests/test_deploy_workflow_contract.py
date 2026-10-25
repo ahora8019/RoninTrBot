@@ -60,7 +60,7 @@ def test_deploy_secret_gate_only_runs_on_main() -> None:
 
 def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     worker = Path("workers/ronin-panel/worker.js").read_text(encoding="utf-8")
-    assert 'return Boolean(env?.PYTHON_CORE_URL || env?.INTERNAL_API_SECRET)' in worker
+    assert 'return Boolean(String(env?.PYTHON_CORE_URL || "").trim() && String(env?.INTERNAL_API_SECRET || ""))' in worker
     assert 'base.protocol !== "https:"' in worker
     assert 'Authorization: "Bearer " + secret' in worker
     assert 'redirect: "error"' in worker  # authenticated core requests must not forward secrets across redirects
