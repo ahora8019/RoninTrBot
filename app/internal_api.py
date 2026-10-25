@@ -17,7 +17,7 @@ from urllib.parse import parse_qs
 from uuid import uuid4
 from wsgiref.simple_server import make_server
 
-from app.market_data.lbank import LBankMarketDataClient, MarketDataError
+from app.market_data.lbank import LBankMarketDataClient, MarketDataError, MarketDataValidationError
 from app.strategy.indicators import Candle as StrategyCandle, SIGNAL_THRESHOLD, analyze_timeframe
 from app.paper.portfolio import PaperConfig, PaperEngine
 from app.paper.runner import run_paper_session
@@ -276,6 +276,10 @@ def create_app(
                     candle for candle in raw_candles
                     if candle.timestamp + interval_seconds <= now
                 ][-limit:]
+                if len(closed_candles) < limit:
+                    raise MarketDataValidationError(
+                        f"LBank returned only {len(closed_candles)} closed candles; {limit} required"
+                    )
                 candles = tuple(StrategyCandle(
                     candle.timestamp, candle.open, candle.high, candle.low, candle.close, candle.volume
                 ) for candle in closed_candles)
