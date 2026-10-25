@@ -1094,7 +1094,7 @@ is connected.
 ===================================================== */
 
 function strategyAssetPrompt() {
-  return "🧠 RoninTrBot • STRATEGY\n━━━━━━━━━━━━━━━━━━\n\nChoose the asset for live regime + signal analysis (paper-only, no orders):";
+  return "🧠 RoninTrBot • STRATEGY\n━━━━━━━━━━━━━━━━━━\n\nChoose the asset for Python Core signal analysis (paper-only, no orders):";
 }
 
 function strategyAssetKeyboard() {
