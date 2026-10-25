@@ -1,8 +1,6 @@
 const VERSION = "2.5.0";
 const BOT_NAME = "RoninTrBot";
 
-import { analyzeTimeframe, classifyRegime } from "./analysis.js";
-
 /*
   RoninTrBot v2.5.0
   Cloudflare Worker
@@ -997,42 +995,26 @@ function normalizeMarketSymbol(symbol) {
 
 async function marketDataPage(symbol = "btc_usdt", interval = "15m", env = {}) {
   if (!isPythonCoreConfigured(env)) return { text: "Python Core is not connected. Configure PYTHON_CORE_URL and INTERNAL_API_SECRET on the Worker; direct market-data fallback is disabled." };
-  const intervals = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } };
+  const intervals = { "15m": { seconds: 900 }, "1h": { seconds: 3600 }, "4h": { seconds: 14400 } };
   symbol = normalizeMarketSymbol(symbol);
   if (!symbol) return { text: "Unsupported asset. Choose BTCUSDT, ETHUSDT, SOLUSDT, XRPUSDT, BNBUSDT, or DOGEUSDT." };
   if (!intervals[interval]) return { text: "Unsupported timeframe. Choose 15m, 1h, or 4h." };
   try {
     const now = Math.floor(Date.now() / 1000);
     const size = 100;
-    let candles;
-    if (isPythonCoreConfigured(env)) {
-      const core = await requestPythonCore(env, "/v1/market/" + encodeURIComponent(symbol) + "/ohlcv?interval=" + encodeURIComponent(interval) + "&limit=" + size);
-      if (core.data?.source !== "lbank" || !Array.isArray(core.data.candles) || core.data.candles.length < 20) throw new Error("python_core_market_data");
-      candles = core.data.candles.map(c => ({
-        ts: Number(c.timestamp), open: Number(c.open), high: Number(c.high),
-        low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
-      }));
-      if (candles.some(c => !Number.isFinite(c.ts) || c.ts <= 0 || [c.open,c.high,c.low,c.close,c.volume].some(v => !Number.isFinite(v)))) throw new Error("python_core_market_data");
-    } else {
-      // Development fallback until PYTHON_CORE_URL and INTERNAL_API_SECRET are configured.
-      // LBank interprets `time` as the starting timestamp, not the current time.
-      const startTime = now - intervals[interval].seconds * size;
-      const params = new URLSearchParams({ symbol, type: intervals[interval].type, size: String(size), time: String(startTime) });
-      const response = await fetch("https://api.lbkex.com/v2/kline.do?" + params.toString(), { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000) });
-      if (!response.ok) throw new Error("http");
-      const payload = await response.json();
-      if (!Array.isArray(payload) && (String(payload?.error_code ?? "0") !== "0" || !["true", "True", true, undefined].includes(payload?.result))) throw new Error("api");
-      const rows = Array.isArray(payload) ? payload : payload?.data;
-      if (!Array.isArray(rows) || rows.length < 20) throw new Error("empty");
-      candles = rows.map(row => {
-        if (!Array.isArray(row) || row.length !== 6) throw new Error("shape");
-        let ts = Number(row[0]); if (ts > 1000000000000) ts = Math.floor(ts / 1000);
-        const values = row.slice(1).map(Number);
-        if (!Number.isFinite(ts) || ts <= 0 || values.some(v => !Number.isFinite(v))) throw new Error("number");
-        const [open, high, low, close, volume] = values;
-        if (Math.min(open, high, low, close) <= 0 || volume < 0 || high < Math.max(open, close, low) || low > Math.min(open, close, high)) throw new Error("ohlc");
-        return { ts, open, high, low, close, volume };
-      }).sort((a,b)=>a.ts-b.ts);
+    const core = await requestPythonCore(
+      env,
+      "/v1/market/" + encodeURIComponent(symbol) + "/ohlcv?interval=" + encodeURIComponent(interval) + "&limit=" + size
+    );
+    if (core.data?.source !== "lbank" || !Array.isArray(core.data.candles) || core.data.candles.length < 20) {
+      throw new Error("python_core_market_data");
+    }
+    const candles = core.data.candles.map(c => ({
+      ts: Number(c.timestamp), open: Number(c.open), high: Number(c.high),
+      low: Number(c.low), close: Number(c.close), volume: Number(c.volume),
+    }));
+    if (candles.some(c => !Number.isFinite(c.ts) || c.ts <= 0 || [c.open,c.high,c.low,c.close,c.volume].some(v => !Number.isFinite(v)))) {
+      throw new Error("python_core_market_data");
     }
     const latest = candles[candles.length-1];
     if (latest.ts > now + intervals[interval].seconds || now-latest.ts > intervals[interval].seconds*3) throw new Error("stale");
@@ -1138,63 +1120,23 @@ function strategyTimeframeKeyboard(symbol) {
   };
 }
 
-/* Live strategy analysis, powered by the JS port of the Python core
-   (workers/ronin-panel/analysis.js — CI-verified parity with app/strategy). */
+/* Strategy analysis is owned by Python Core; this Worker only formats the result. */
 async function strategyAnalysisPage(symbol = "btc_usdt", interval = "1h", env = {}) {
   if (!isPythonCoreConfigured(env)) return "🔒 Python Core is not connected. Configure PYTHON_CORE_URL and INTERNAL_API_SECRET on the Worker. No fallback analysis is used.";
   try {
-    if (isPythonCoreConfigured(env)) {
-      const core = await requestPythonCore(env, "/v1/strategy/analysis?symbol=" + encodeURIComponent(symbol) + "&interval=" + encodeURIComponent(interval));
-      const a = core.data;
-      if (a?.source !== "lbank" || a?.execution !== "none") throw new Error("python_core_strategy");
-      const dirEmoji = a.direction === "long" ? "🟢 LONG" : a.direction === "short" ? "🔴 SHORT" : "⚪ NEUTRAL";
-      const fmt = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 8 });
-      return "🧠 RoninTrBot • STRATEGY (Python Core)\n━━━━━━━━━━━━━━━━━━\n\n"
-        + "Asset\n" + String(a.symbol || symbol).toUpperCase().replace("_", "/") + " · " + interval + "\n\n"
-        + "Signal\n" + dirEmoji + "\n\n"
-        + "Score\n" + a.score + " / 100" + (a.eligible ? "  ✅ above threshold " + a.threshold : "  🔒 below threshold " + a.threshold)
-        + "\n\nRSI(14)\n" + fmt(a.rsi) + "\n\nATR(14)\n" + fmt(a.atr)
-        + "\n\n━━━━━━━━━━━━━━━━━━\n"
-        + (Array.isArray(a.reasons) ? a.reasons.map(r => "• " + r).join("\n") : "")
-        + "\n\n🔒 Python Core analysis only · No order placed";
-    }
-    const now = Math.floor(Date.now() / 1000);
-    const size = 100;
-    const meta = { "15m": { type: "minute15", seconds: 900 }, "1h": { type: "hour1", seconds: 3600 }, "4h": { type: "hour4", seconds: 14400 } }[interval];
-    if (!meta) return "Unsupported timeframe.";
-    const params = new URLSearchParams({
-      symbol: String(symbol).toLowerCase(), type: meta.type,
-      size: String(size), time: String(now - meta.seconds * size),
-    });
-    const resp = await fetch("https://api.lbkex.com/v2/kline.do?" + params.toString(), {
-      headers: { Accept: "application/json" }, signal: AbortSignal.timeout(7000),
-    });
-    if (!resp.ok) throw new Error("http");
-    const payload = await resp.json();
-    const rows = Array.isArray(payload) ? payload : payload?.data;
-    if (!Array.isArray(rows) || rows.length < 51) throw new Error("empty");
-    const candles = rows.map((row) => {
-      let ts = Number(row[0]); if (ts > 1000000000000) ts = Math.floor(ts / 1000);
-      return {
-        timestamp: ts, open: Number(row[1]), high: Number(row[2]),
-        low: Number(row[3]), close: Number(row[4]), volume: Number(row[5]),
-      };
-    });
-    const analysis = analyzeTimeframe(interval, candles);
-    const regime = classifyRegime(candles);
-    const dirEmoji = analysis.direction === "long" ? "🟢 LONG" : analysis.direction === "short" ? "🔴 SHORT" : "⚪ NEUTRAL";
-    const regimeEmoji = regime === "trend" ? "📈 TREND" : regime === "range" ? "〰️ RANGE" : "⚠️ HIGH VOLATILITY";
+    const core = await requestPythonCore(env, "/v1/strategy/analysis?symbol=" + encodeURIComponent(symbol) + "&interval=" + encodeURIComponent(interval));
+    const a = core.data;
+    if (a?.source !== "lbank" || a?.execution !== "none") throw new Error("python_core_strategy");
+    const dirEmoji = a.direction === "long" ? "🟢 LONG" : a.direction === "short" ? "🔴 SHORT" : "⚪ NEUTRAL";
     const fmt = (n) => Number(n).toLocaleString("en-US", { maximumFractionDigits: 8 });
-    return "🧠 RoninTrBot • STRATEGY (live)\n━━━━━━━━━━━━━━━━━━\n\n"
-      + "Asset\n" + String(symbol).toUpperCase().replace("_", "/") + " · " + interval + "\n\n"
-      + "Regime\n" + regimeEmoji + "\n\n"
-      + "Signal\n" + dirEmoji + "\n\n"
-      + "Score\n" + analysis.score + " / 100"
-      + (analysis.eligible ? "  ✅ above threshold 70" : "  🔒 below threshold 70")
-      + "\n\nRSI(14)\n" + analysis.rsi.toFixed(2) + "\n\nATR(14)\n" + fmt(analysis.atr)
-      + "\n\n━━━━━━━━━━━━━━━━━━\n"
-      + analysis.reasons.map((r) => "• " + r).join("\n")
-      + "\n\n🔒 Analysis only · No order placed";
+    return "🧠 RoninTrBot • STRATEGY (Python Core)\\n━━━━━━━━━━━━━━━━━━\\n\\n"
+      + "Asset\\n" + String(a.symbol || symbol).toUpperCase().replace("_", "/") + " · " + interval + "\\n\\n"
+      + "Signal\\n" + dirEmoji + "\\n\\n"
+      + "Score\\n" + a.score + " / 100" + (a.eligible ? "  ✅ above threshold " + a.threshold : "  🔒 below threshold " + a.threshold)
+      + "\\n\\nRSI(14)\\n" + fmt(a.rsi) + "\\n\\nATR(14)\\n" + fmt(a.atr)
+      + "\\n\\n━━━━━━━━━━━━━━━━━━\\n"
+      + (Array.isArray(a.reasons) ? a.reasons.map(r => "• " + r).join("\\n") : "")
+      + "\\n\\n🔒 Python Core analysis only · No order placed";
   } catch (error) {
     return "🧠 Strategy analysis unavailable (" + String(error?.message || "error").slice(0, 60) + "). No action taken.";
   }
