@@ -143,7 +143,7 @@ def test_excessively_nested_json_response_is_normalized_to_market_data_error(mon
             return False
 
         def read(self, size=-1):
-            return b"[" * 1500 + b"]" * 1500
+            return b"[" * 10000 + b"]" * 10000
 
     monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: DeeplyNestedResponse())
     with pytest.raises(MarketDataError, match="RecursionError"):
