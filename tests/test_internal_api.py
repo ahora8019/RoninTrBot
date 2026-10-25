@@ -433,3 +433,60 @@ def test_paper_session_excludes_forming_candle(monkeypatch, tmp_path):
 
     assert status == "200 OK"
     assert payload["data"]["candles_processed"] == 60
+
+
+def test_strategy_analysis_uses_request_start_time_for_candle_closure(monkeypatch):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    clock = {"now": 1_800_000_000 + 60 * 3600 - 1}
+    monkeypatch.setattr("app.internal_api.time.time", lambda: clock["now"])
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            clock["now"] += 2
+            return [
+                Candle(1_800_000_000 + i * 3600,
+                       Decimal(100 + i), Decimal(102 + i), Decimal(99 + i),
+                       Decimal(101 + i), Decimal("10"))
+                for i in range(61)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    status, _, payload = request(
+        app, path="/v1/strategy/analysis", query_string="symbol=btc_usdt&interval=1h"
+    )
+
+    assert status == "200 OK"
+    assert payload["data"]["close"] == "159"
+
+
+def test_paper_session_uses_request_start_time_for_candle_closure(monkeypatch, tmp_path):
+    from decimal import Decimal
+    from app.market_data.lbank import Candle
+
+    monkeypatch.setenv("RONINTRBOT_LAB_MODE", "true")
+    monkeypatch.setenv("RONINTRBOT_PAPER_DB_PATH", str(tmp_path / "paper.sqlite3"))
+    clock = {"now": 1_800_000_000 + 60 * 3600 - 1}
+    monkeypatch.setattr("app.internal_api.time.time", lambda: clock["now"])
+
+    class FakeMarketDataClient:
+        def fetch_ohlcv(self, symbol, interval, limit):
+            clock["now"] += 2
+            return [
+                Candle(1_800_000_000 + i * 3600, Decimal(100 + i),
+                       Decimal(102 + i), Decimal(99 + i), Decimal(101 + i), Decimal("10"))
+                for i in range(61)
+            ]
+
+    app = create_app(secret="test-secret", market_data_client=FakeMarketDataClient())
+    status, _, payload = request(
+        app,
+        path="/v1/paper/session",
+        method="POST",
+        body={"policy": "trend", "candles_ref": "lbank:btc_usdt:1h:60"},
+        extra_headers={"HTTP_IDEMPOTENCY_KEY": "closed-candle-race-key"},
+    )
+
+    assert status == "200 OK"
+    assert payload["data"]["candles_processed"] == 59
