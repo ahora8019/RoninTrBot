@@ -132,6 +132,24 @@ def test_truncated_http_body_is_normalized_to_market_data_error(monkeypatch):
         lbank_module._default_transport("https://example.invalid", {}, 1.0)
 
 
+def test_excessively_nested_json_response_is_normalized_to_market_data_error(monkeypatch):
+    import app.market_data.lbank as lbank_module
+
+    class DeeplyNestedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            return b"[" * 1500 + b"]" * 1500
+
+    monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: DeeplyNestedResponse())
+    with pytest.raises(MarketDataError, match="RecursionError"):
+        lbank_module._default_transport("https://example.invalid", {}, 1.0)
+
+
 def test_oversized_response_is_rejected(monkeypatch):
     import app.market_data.lbank as lbank_module
 
