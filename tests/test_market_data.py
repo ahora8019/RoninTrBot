@@ -105,10 +105,30 @@ def test_invalid_utf8_response_is_normalized_to_market_data_error(monkeypatch):
             return False
 
         def read(self, size=-1):
-            return b"\\xff\\xfe"
+            return b"\xff\xfe"
 
     monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: InvalidUtf8Response())
     with pytest.raises(MarketDataError, match="UnicodeDecodeError"):
+        lbank_module._default_transport("https://example.invalid", {}, 1.0)
+
+
+def test_truncated_http_body_is_normalized_to_market_data_error(monkeypatch):
+    from http.client import IncompleteRead
+
+    import app.market_data.lbank as lbank_module
+
+    class TruncatedResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            raise IncompleteRead(b'{"result":', 8)
+
+    monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: TruncatedResponse())
+    with pytest.raises(MarketDataError, match="IncompleteRead"):
         lbank_module._default_transport("https://example.invalid", {}, 1.0)
 
 
