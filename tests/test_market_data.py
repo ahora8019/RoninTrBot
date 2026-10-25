@@ -94,6 +94,24 @@ def test_limit_above_window_safe_maximum_is_rejected():
     assert calls == []
 
 
+def test_invalid_utf8_response_is_normalized_to_market_data_error(monkeypatch):
+    import app.market_data.lbank as lbank_module
+
+    class InvalidUtf8Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self, size=-1):
+            return b"\\xff\\xfe"
+
+    monkeypatch.setattr(lbank_module, "urlopen", lambda request, timeout: InvalidUtf8Response())
+    with pytest.raises(MarketDataError, match="UnicodeDecodeError"):
+        lbank_module._default_transport("https://example.invalid", {}, 1.0)
+
+
 def test_oversized_response_is_rejected(monkeypatch):
     import app.market_data.lbank as lbank_module
 
