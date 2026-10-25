@@ -63,6 +63,7 @@ def test_python_core_worker_adapter_requires_https_and_bearer_auth() -> None:
     assert 'return Boolean(env?.PYTHON_CORE_URL || env?.INTERNAL_API_SECRET)' in worker
     assert 'base.protocol !== "https:"' in worker
     assert 'Authorization: "Bearer " + secret' in worker
+    assert 'redirect: "error"' in worker  # authenticated core requests must not forward secrets across redirects
     assert 'signal: AbortSignal.timeout(8000)' in worker
     assert '"/v1/market/" + encodeURIComponent(symbol)' in worker
     assert '"/v1/strategy/analysis?symbol="' in worker
