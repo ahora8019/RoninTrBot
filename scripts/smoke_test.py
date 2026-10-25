@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Read-only post-deployment smoke test for RoninTrBot's Worker edge.
 
-Checks health and proves that an unauthenticated synthetic POST is rejected.
-It does not call Telegram or perform trading actions.
+Checks health, verifies the exact deployed Git revision when requested, and
+proves that an unauthenticated synthetic POST is rejected. It does not call
+Telegram or perform trading actions.
 """
 from __future__ import annotations
 
@@ -13,13 +14,21 @@ import sys
 import urllib.error
 import urllib.request
 
-REQUIRED_FIELDS = {"service", "version", "status", "engine", "paperTrading", "webhookAuth"}
+REQUIRED_FIELDS = {"service", "version", "gitSha", "status", "engine", "paperTrading", "webhookAuth"}
+GIT_SHA_RE = re.compile(r"[0-9a-f]{40}")
 USER_AGENT = "RoninTrBot-SmokeTest/1.0 (+python)"
 DEFAULT_BASE_URL = "https://ronintrbot.ahora-project.workers.dev"
 
 
-def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
+def smoke(
+    base_url: str,
+    timeout: float = 10.0,
+    expected_sha: str | None = None,
+) -> list[str]:
     base = base_url.rstrip("/")
+    if expected_sha is not None and not GIT_SHA_RE.fullmatch(expected_sha):
+        return ["expected Git SHA must be exactly 40 lowercase hexadecimal characters"]
+
     try:
         request = urllib.request.Request(base + "/", headers={"User-Agent": USER_AGENT})
         with urllib.request.urlopen(request, timeout=timeout) as resp:
@@ -44,6 +53,13 @@ def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
         failures.append(f"status is {payload.get('status')!r}, expected 'online'")
     if not re.fullmatch(r"\d+\.\d+\.\d+", str(payload.get("version", ""))):
         failures.append(f"version {payload.get('version')!r} is not semver")
+    actual_sha = payload.get("gitSha")
+    if not isinstance(actual_sha, str) or not GIT_SHA_RE.fullmatch(actual_sha):
+        failures.append("gitSha is missing, unknown, or not a full 40-character lowercase Git SHA")
+    elif expected_sha is not None and actual_sha != expected_sha:
+        failures.append(
+            f"deployed gitSha {actual_sha!r} does not match expected SHA {expected_sha!r}"
+        )
     if payload.get("webhookAuth") != "configured":
         failures.append(
             f"webhookAuth is {payload.get('webhookAuth')!r}; expected 'configured'"
@@ -78,8 +94,12 @@ def smoke(base_url: str, timeout: float = 10.0) -> list[str]:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--base-url", default=DEFAULT_BASE_URL)
+    parser.add_argument(
+        "--expected-sha",
+        help="require the live Worker to report this exact 40-character Git commit SHA",
+    )
     args = parser.parse_args()
-    failures = smoke(args.base_url)
+    failures = smoke(args.base_url, expected_sha=args.expected_sha)
     for failure in failures:
         print(f"SMOKE FAIL: {failure}", file=sys.stderr)
     if failures:
