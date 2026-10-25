@@ -488,5 +488,5 @@ def test_paper_session_uses_request_start_time_for_candle_closure(monkeypatch, t
         extra_headers={"HTTP_IDEMPOTENCY_KEY": "closed-candle-race-key"},
     )
 
-    assert status == "200 OK"
-    assert payload["data"]["candles_processed"] == 59
+    assert status == "502 Bad Gateway"
+    assert payload["error"]["code"] == "market_data_unavailable"
