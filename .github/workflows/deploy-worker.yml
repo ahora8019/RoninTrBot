@@ -2,16 +2,13 @@ name: Deploy Worker
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths: ["workers/**", ".github/workflows/deploy-worker.yml"]
 
 permissions:
   contents: read
 
 jobs:
   secrets-present:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     outputs: { ready: ${{ steps.check.outputs.ready }} }
     steps:
@@ -28,7 +25,7 @@ jobs:
           echo "ready=yes" >> "$GITHUB_OUTPUT"
 
   deploy:
-    if: github.ref == 'refs/heads/main'
+    if: github.ref == 'refs/heads/main' && github.event_name == 'workflow_dispatch'
     needs: secrets-present
     runs-on: ubuntu-latest
     steps:
