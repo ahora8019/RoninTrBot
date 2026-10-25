@@ -34,6 +34,7 @@ _JSON_HEADERS = [
 _SHA_PATTERN = re.compile(r"^[0-9a-fA-F]{7,40}$")
 _MARKET_PATH = re.compile(r"^/v1/market/([a-z0-9]+_[a-z0-9]+)/ohlcv$")
 _ALLOWED_INTERVALS = {"15m", "1h", "4h"}
+_INTERVAL_SECONDS = {"15m": 15 * 60, "1h": 60 * 60, "4h": 4 * 60 * 60}
 _MAX_MARKET_LIMIT = 1200
 
 
@@ -265,10 +266,18 @@ def create_app(
                 )
             symbol, interval, limit = match.group(1), match.group(2), int(match.group(3))
             try:
-                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit)
+                # LBank may include the currently forming candle. Fetch one
+                # extra row, then retain only fully closed candles for replay.
+                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit + 1)
+                interval_seconds = _INTERVAL_SECONDS[interval]
+                now = int(time.time())
+                closed_candles = [
+                    candle for candle in raw_candles
+                    if candle.timestamp + interval_seconds <= now
+                ][-limit:]
                 candles = tuple(StrategyCandle(
                     candle.timestamp, candle.open, candle.high, candle.low, candle.close, candle.volume
-                ) for candle in raw_candles)
+                ) for candle in closed_candles)
                 policy = TrendPolicy(
                     timeframe=interval, market_type="spot", symbol=symbol,
                     limits=RiskLimits(max_notional_fraction=Decimal("0.95")),
@@ -353,7 +362,9 @@ def create_app(
                 )
             symbol, interval = symbols[0], intervals[0]
             try:
-                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, 200)
+                # Ask for one extra row because the last LBank candle may
+                # still be forming and must not influence a strategy signal.
+                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, 201)
             except MarketDataError:
                 return error_response(
                     start_response,
@@ -371,12 +382,18 @@ def create_app(
                     "The symbol or interval is invalid.",
                 )
 
+            interval_seconds = _INTERVAL_SECONDS[interval]
+            now = int(time.time())
+            closed_candles = [
+                candle for candle in raw_candles
+                if candle.timestamp + interval_seconds <= now
+            ][-200:]
             candles = tuple(
                 StrategyCandle(
                     candle.timestamp, candle.open, candle.high, candle.low,
                     candle.close, candle.volume,
                 )
-                for candle in raw_candles
+                for candle in closed_candles
             )
             try:
                 analysis = analyze_timeframe(interval, candles)
