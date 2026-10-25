@@ -266,11 +266,12 @@ def create_app(
                 )
             symbol, interval, limit = match.group(1), match.group(2), int(match.group(3))
             try:
-                # LBank may include the currently forming candle. Fetch one
-                # extra row, then retain only fully closed candles for replay.
-                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit + 1)
+                # Capture time before the request: a candle that closes while
+                # the network call is in flight was not guaranteed closed in
+                # the returned snapshot, so conservatively exclude it.
                 interval_seconds = _INTERVAL_SECONDS[interval]
                 now = int(time.time())
+                raw_candles = lbank_client.fetch_ohlcv(symbol, interval, limit + 1)
                 closed_candles = [
                     candle for candle in raw_candles
                     if candle.timestamp + interval_seconds <= now
@@ -362,6 +363,10 @@ def create_app(
                 )
             symbol, interval = symbols[0], intervals[0]
             try:
+                # Capture time before the request so a candle that closes
+                # during network latency is not treated as finalized data.
+                interval_seconds = _INTERVAL_SECONDS[interval]
+                now = int(time.time())
                 # Ask for one extra row because the last LBank candle may
                 # still be forming and must not influence a strategy signal.
                 raw_candles = lbank_client.fetch_ohlcv(symbol, interval, 201)
@@ -382,8 +387,6 @@ def create_app(
                     "The symbol or interval is invalid.",
                 )
 
-            interval_seconds = _INTERVAL_SECONDS[interval]
-            now = int(time.time())
             closed_candles = [
                 candle for candle in raw_candles
                 if candle.timestamp + interval_seconds <= now
